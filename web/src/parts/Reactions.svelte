@@ -1,7 +1,7 @@
 <script>
   // Reaktionen und Kommentare unter einem Foto. Die zwei neuesten Kommentare sind immer zu sehen.
   import Icon from './Icon.svelte';
-  import { S, G, reactionsOf, mem, mName, isSystem, post, del } from '../lib/store.svelte.js';
+  import { S, G, reactionsOf, mem, mName, isSystem, post, del, freshCount, seenAt, markSeen } from '../lib/store.svelte.js';
   import { tryDo, open } from '../lib/ui.svelte.js';
   import { toggle } from '../lib/react.js';
   import { shareEntry } from '../lib/share.js';
@@ -14,6 +14,11 @@
   const shown = $derived(all3 ? comments : comments.slice(-2));
   const groups = $derived(REACTS.map(e => ({ e, who: all.filter(r => r.emoji === e) })).filter(g => g.who.length));
   const mineEntry = $derived(involved(entry, S.meId));
+  // Neue Kommentare: rote Zahl am Symbol, bis man sie aufmacht. Beim Aufmachen bleibt „neu“ an den Kommentaren stehen.
+  const fresh = $derived(freshCount(entry.id));
+  let openedAt = $state(null);
+  const isNew = c => c.member_id !== S.meId && c.created_at > (openedAt ?? seenAt(entry.id));
+  function opened() { if (openedAt === null) openedAt = seenAt(entry.id); markSeen(entry.id); }
 
   // Gedrückt halten (oder Rechtsklick) zeigt, wer womit reagiert hat. Kurz tippen reagiert wie bisher.
   let holdTimer, held = false;
@@ -24,7 +29,8 @@
   function tap(emoji) { if (held) return void (held = false); toggle(entry, emoji); }
   function pick(emoji) { picking = false; toggle(entry, emoji); }
 
-  async function write(to = null) { replyTo = to; writing = true; all3 = true; await Promise.resolve(); input?.focus(); }
+  async function write(to = null) { opened(); replyTo = to; writing = true; all3 = true; await Promise.resolve(); input?.focus(); }
+  function showAll() { opened(); all3 = true; }
   const parentOf = c => (c.reply_to ? comments.find(x => x.id === c.reply_to) : null);
   async function send() {
     const t = text.trim();
@@ -60,14 +66,14 @@
         title="{g.who.map(r => mName(r.member_id)).join(', ')} (gedrückt halten für Details)">{g.e} {g.who.length}</button>
     {/each}
     <button class="rc ghost" onclick={() => (picking = true)} aria-label="Reagieren"><Icon name="smile-plus" size={16} /></button>
-    <button class="rc ghost" onclick={() => write()} aria-label="Kommentieren"><Icon name="message-circle" size={16} />{comments.length || ''}</button>
+    <button class="rc ghost" class:hot={fresh} onclick={() => write()} aria-label={fresh ? `${fresh} neue Kommentare` : 'Kommentieren'}><Icon name="message-circle" size={16} />{comments.length || ''}{#if fresh}<i class="fresh">+{fresh} neu</i>{/if}</button>
     {#if mineEntry}<button class="rc ghost" onclick={() => tryDo(() => shareEntry(entry))} aria-label="Als Bild teilen"><Icon name="share-2" size={16} /></button>{/if}
   {/if}
 </div>
 
 {#if comments.length || writing}
   <div class="cmts">
-    {#if comments.length > shown.length}<button class="more" onclick={() => (all3 = true)}>Alle {comments.length} Kommentare ansehen</button>{/if}
+    {#if comments.length > shown.length}<button class="more" class:hot={fresh} onclick={showAll}>Alle {comments.length} Kommentare ansehen{fresh ? ` · ${fresh} neu` : ''}</button>{/if}
     {#each shown as c (c.id)}
       {@const sys = isSystem(c.member_id)}
       {@const parent = parentOf(c)}
@@ -76,7 +82,7 @@
         <div class="cb">
           <div class="ch">
             <b>{mName(c.member_id)}</b>{#if sys}<span class="badge">System</span>{/if}
-            <time>{ago(c.created_at)}</time>
+            <time>{ago(c.created_at)}</time>{#if isNew(c)}<span class="newtag">neu</span>{/if}
             {#if c.member_id === S.meId || G.admin}<button class="cx" onclick={() => confirm('Kommentar löschen?') && tryDo(() => del('/reactions/' + c.id))} aria-label="Kommentar löschen"><Icon name="x" size={12} /></button>{/if}
           </div>
           <p>{#if parent}<span class="at">@{mName(parent.member_id)}</span> {/if}{c.text}</p>

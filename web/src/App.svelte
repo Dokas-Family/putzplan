@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { fly, fade } from 'svelte/transition';
   import Icon from './parts/Icon.svelte';
   import { S, G, mName } from './lib/store.svelte.js';
@@ -27,7 +28,50 @@
   const items = $derived(NAV.filter(n => !n.admin || G.admin));
   const View = $derived(VIEWS[items.some(n => n.id === S.tab) ? S.tab : 'heute']);
   const badge = $derived(G.admin ? G.queue.length + G.proposals.length + G.pinHelp.length : 0);
-  const go = id => { S.tab = id; scrollTo(0, 0); };
+  const fresh = $derived(G.freshMine); // neue Kommentare bei meinen Beiträgen
+  const dot = id => (id === 'uebersicht' ? badge : id === 'fotos' ? fresh : 0);
+  // Ansicht merken: Reiter und Scrollstelle überstehen Neuladen und Reiterwechsel.
+  // Gemerkt wird der oberste sichtbare Beitrag (data-anchor), weil Pixel bei nachladenden Bildern ungenau sind.
+  const VIEW = 'pp_view', FRESH = 30 * 60e3;
+  const readView = () => { try { return JSON.parse(localStorage.getItem(VIEW) || '{}') || {}; } catch { return {}; } };
+  const saveView = patch => { try { localStorage.setItem(VIEW, JSON.stringify({ ...readView(), ...patch, at: Date.now() })); } catch {} };
+  function where() {
+    for (const el of document.querySelectorAll('[data-anchor]')) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 70) return { id: el.dataset.anchor, off: r.top, y: scrollY };
+    }
+    return { y: scrollY };
+  }
+  function remember() { if (S.phase === 'app') saveView({ tab: S.tab, pos: { ...(readView().pos || {}), [S.tab]: where() } }); }
+  async function restore(tab) {
+    const v = readView(), p = v.pos?.[tab];
+    await tick();
+    await new Promise(r => requestAnimationFrame(r));
+    if (!p || Date.now() - (v.at || 0) > FRESH) return scrollTo(0, 0);
+    const align = () => {
+      const el = p.id && document.querySelector(`[data-anchor="${CSS.escape(p.id)}"]`);
+      if (el) scrollTo(0, scrollY + el.getBoundingClientRect().top - p.off);
+      else scrollTo(0, p.y || 0);
+    };
+    align();
+    setTimeout(align, 300); // falls oben noch etwas nachgeladen wurde
+  }
+  function go(id) {
+    if (id === S.tab) return scrollTo({ top: 0, behavior: 'smooth' }); // nochmal tippen: nach oben
+    remember();
+    S.tab = id;
+    saveView({ tab: id });
+    restore(id);
+  }
+  let saveTimer;
+  $effect(() => {
+    const onScroll = () => { clearTimeout(saveTimer); saveTimer = setTimeout(remember, 250); };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('pagehide', remember);
+    return () => { removeEventListener('scroll', onScroll); removeEventListener('pagehide', remember); };
+  });
+  let restored = false;
+  $effect(() => { if (S.phase === 'app' && G.me && !restored) { restored = true; restore(S.tab); } });
 
   // Durchsagen kommen bei offenen Apps sofort als Meldung an
   $effect(() => { if (S.say && S.say.from !== S.meId) toast(`Durchsage von ${mName(S.say.from)}: ${S.say.text}`, 8000); });
@@ -58,7 +102,7 @@
     <aside class="side">
       <div class="logo"><Icon name="sparkles" />Putzplan</div>
       {#each items as n (n.id)}
-        <button class:on={S.tab === n.id} onclick={() => go(n.id)}><Icon name={n.icon} />{n.label}{#if n.id === 'uebersicht' && badge}<i class="nb">{badge}</i>{/if}</button>
+        <button class:on={S.tab === n.id} onclick={() => go(n.id)}><Icon name={n.icon} />{n.label}{#if dot(n.id)}<i class="nb">{dot(n.id)}</i>{/if}</button>
       {/each}
       <div class="who"><span class="ava sm">{G.me.emoji}</span><div><b>{G.me.name}</b><small>{ROLES[G.me.role]}</small></div></div>
     </aside>
@@ -70,7 +114,7 @@
   </div>
   <nav class="tabs">
     {#each items.filter(n => !n.desk) as n (n.id)}
-      <button class:on={S.tab === n.id} onclick={() => go(n.id)}><Icon name={n.icon} /><span>{n.label}</span>{#if n.id === 'uebersicht' && badge}<i class="nb">{badge}</i>{/if}</button>
+      <button class:on={S.tab === n.id} onclick={() => go(n.id)}><Icon name={n.icon} /><span>{n.label}</span>{#if dot(n.id)}<i class="nb">{dot(n.id)}</i>{/if}</button>
     {/each}
   </nav>
 {/if}

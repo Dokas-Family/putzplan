@@ -44,12 +44,13 @@ if (!hasCol('tasks', 'pflicht')) { db.exec('alter table tasks add column pflicht
 if (!hasCol('entries', 'before_video')) db.exec('alter table entries add column before_video text; alter table entries add column after_video text;');
 if (!hasCol('entries', 'ai')) db.exec('alter table entries add column ai text'); // was Claude zu den Fotos meint (JSON)
 if (!hasCol('reactions', 'reply_to')) db.exec('alter table reactions add column reply_to text'); // Antwort auf einen Kommentar
+if (!hasCol('entries', 'pending')) db.exec("alter table entries add column pending text default '[]'"); // wer mithelfen möchte, aber noch nicht bestätigt ist
 export { markDuties };
 
 const COLS = {
   members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help'],
   tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
-  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai'],
+  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai', 'pending'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at', 'reply_to'],
 };
 const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active', 'pflicht'] };
@@ -81,6 +82,8 @@ export function out(table, r) {
     try { o.helpers = JSON.parse(o.helpers || '[]'); } catch { o.helpers = []; }
     if (!Array.isArray(o.helpers)) o.helpers = [];
     try { o.ai = o.ai ? JSON.parse(o.ai) : null; } catch { o.ai = null; }
+    try { o.pending = JSON.parse(o.pending || '[]'); } catch { o.pending = []; }
+    if (!Array.isArray(o.pending)) o.pending = [];
   }
   if (table === 'members') { o.has_pin = !!o.pin_hash; delete o.pin_hash; }
   if (table === 'log') { o.can_undo = !!o.undo && !o.undone; delete o.undo; o.undone = !!o.undone; }

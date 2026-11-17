@@ -3,7 +3,7 @@
   import Icon from '../parts/Icon.svelte';
   import Ring from '../parts/Ring.svelte';
   import { S, G, mem, mName, taskOf } from '../lib/store.svelte.js';
-  import { start, finish, redo, cancel, join, dropEntry, redeem } from '../lib/act.js';
+  import { start, finish, redo, cancel, join, dropEntry, redeem, decideHelper } from '../lib/act.js';
   import { open, toast } from '../lib/ui.svelte.js';
   import { roomOf } from '../lib/rooms.js';
   import Extra from '../sheets/Extra.svelte';
@@ -118,6 +118,16 @@
             <span class="chip c-brand"><Icon name="handshake" size={14} />Du hilfst mit</span>
           {/if}
         </div>
+        {#if e.member_id === me.id}
+          {#each e.pending as h (h)}
+            <div class="row ask">
+              <span class="ava sm">{mem(h)?.emoji || '🙂'}</span>
+              <div class="grow"><b>{mName(h)} möchte mithelfen</b><small>bei {e.title}</small></div>
+              <button class="icb" onclick={() => decideHelper(e, h, false)} aria-label="Ablehnen"><Icon name="x" size={16} /></button>
+              <button class="btn ok sm" onclick={() => decideHelper(e, h, true)}><Icon name="check" size={16} />Ja</button>
+            </div>
+          {/each}
+        {/if}
       {/each}
       {#each duties as e (e.id)}
         <div class="row">
@@ -163,7 +173,8 @@
         <div class="row">
           <span class="ava sm">{mem(e.member_id)?.emoji || '🙂'}</span>
           <div class="grow"><b>{e.title}</b><small>{mName(e.member_id)}{e.helpers.length ? ' + ' + e.helpers.map(mName).join(', ') : ''} ist dran · seit {mins(e.before_at)} Min</small></div>
-          <button class="btn sec sm" onclick={() => join(e)}><Icon name="handshake" size={16} />Mithelfen</button>
+          {#if e.pending.includes(me.id)}<span class="chip"><Icon name="hourglass" size={14} />Angefragt</span>
+          {:else}<button class="btn sec sm" onclick={() => join(e)}><Icon name="handshake" size={16} />Mithelfen</button>{/if}
         </div>
       {/each}
       {#each freeDuties as t (t.id)}
@@ -205,7 +216,8 @@
         <div class="row">
           <span class="ava sm">{mem(e.member_id)?.emoji || '🙂'}</span>
           <div class="grow"><b>{e.title}</b><small>{mName(e.member_id)} ist dran · seit {mins(e.before_at)} Min</small></div>
-          <button class="btn sec sm" onclick={() => join(e)}><Icon name="handshake" size={16} />Mithelfen</button>
+          {#if e.pending.includes(me.id)}<span class="chip"><Icon name="hourglass" size={14} />Angefragt</span>
+          {:else}<button class="btn sec sm" onclick={() => join(e)}><Icon name="handshake" size={16} />Mithelfen</button>{/if}
         </div>
       {/each}
     {/if}

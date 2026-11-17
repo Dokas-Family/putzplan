@@ -152,7 +152,14 @@ button.chip{border:0;color:inherit}
 .cx{color:var(--muted);margin-left:auto;padding:2px;display:grid;place-items:center}
 .cb p{margin:2px 0 0;font-size:14px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-line}
 .more{color:var(--muted);font-weight:700;font-size:13px;text-align:left;padding:0 2px}
+.rc .fresh{font-style:normal;background:var(--bad);color:#fff;border-radius:99px;padding:1px 7px;font-size:11.5px;font-weight:800;margin-left:2px}
+.rc.hot{border-color:var(--bad);color:var(--ink)}
+.more.hot{color:var(--bad-t)}
+.newtag{background:var(--bad);color:#fff;border-radius:6px;padding:0 5px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
 .cmt.rep{margin-left:24px}
+.icb{position:relative}
+.icb .nb{top:-4px;left:auto;right:-4px}
+.list>.row.ask{background:color-mix(in srgb,var(--ok) 10%,var(--card));border-radius:12px;padding:8px;margin:2px 0 6px;border-bottom:0}
 .cmt.rep .cav{width:24px;height:24px;font-size:13px}
 .at{color:var(--brand-t);font-weight:700;margin-right:4px}
 .reply{color:var(--muted);font-size:12px;font-weight:700;padding:2px 0 0}
@@ -242,7 +249,9 @@ button.chip{border:0;color:inherit}
 .zoom video{width:100%;border-radius:12px;display:block;background:#000}
 .zoom{display:grid;gap:8px}
 .zoom img{width:100%;border-radius:12px;display:block}
-@media(min-width:700px){.zoom.two{grid-template-columns:1fr 1fr}.sheet.big{max-width:900px}}
+.zimg{position:relative;display:block}
+.zimg .hi{position:absolute;inset:0;height:100%;object-fit:cover;opacity:0;transition:opacity .2s}
+.zimg .hi.ready{opacity:1}@media(min-width:700px){.zoom.two{grid-template-columns:1fr 1fr}.sheet.big{max-width:900px}}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1e1b33;color:#fff;padding:11px 16px;border-radius:14px;font-weight:700;z-index:50;max-width:90vw;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3)}
 .rain{position:fixed;inset:0;pointer-events:none;z-index:60;overflow:hidden}
 .rain span{position:absolute;top:-60px;animation:fall linear forwards}

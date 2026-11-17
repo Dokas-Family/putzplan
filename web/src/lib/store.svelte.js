@@ -60,6 +60,19 @@ export const G = {
   /** Offene Dienste von mir. Solange es welche gibt, sind Extras gesperrt (wenn die Regel an ist). */
   get myOpen() { return me ? L.openDuties(calc.ix, me.id) : []; },
   get extrasLocked() { return calc.plan && !!S.settings.extras_sperre && G.myOpen.length > 0; },
+  /** Neue Kommentare unter meinen Beiträgen oder als Antwort auf mich (für die Zahl am Fotos-Reiter). */
+  get freshMine() {
+    if (!me || !seen.base) return 0;
+    const mineIds = new Set(S.reactions.filter(r => r.member_id === me.id && r.text).map(r => r.id));
+    const entries = new Map(S.entries.map(e => [e.id, e]));
+    let n = 0;
+    for (const r of S.reactions) {
+      if (!r.text || r.member_id === me.id || r.created_at <= seenAt(r.entry_id)) continue;
+      const e = entries.get(r.entry_id);
+      if ((e && L.involved(e, me.id)) || mineIds.has(r.reply_to)) n++;
+    }
+    return n;
+  },
   /** Der Dienstplan startet bald (eingeschaltet, aber erst ab morgen). */
   get planSoon() { return !!S.settings.dienste && !!S.settings.plan_start && S.settings.plan_start > calc.today; },
   get active() { return S.members.filter(m => m.active); },
@@ -74,6 +87,29 @@ export const G = {
   get shared() { const d = calc.d; return S.tasks.filter(t => t.active && !t.per_person && L.activeOn(t, d) && (L.dueOn(t, d) || L.overdueInPeriod(t, d))); },
   get late() { const { d, ix } = calc; return G.shared.filter(t => L.overdueInPeriod(t, d) && !L.entryFor(ix, t, d, null)); },
 };
+// ---------- Neue Kommentare ----------
+// Pro Gerät und Person: wann die Kommentare eines Eintrags zuletzt angesehen wurden. Was vorher da war, gilt nicht als neu.
+class Seen { map = $state.raw({}); base = $state(''); }
+export const seen = new Seen();
+const seenKey = () => 'pp_seen_' + S.meId;
+function loadSeen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(seenKey()) || 'null');
+    seen.map = raw?.map || {}; seen.base = raw?.base || new Date().toISOString();
+    if (!raw) saveSeen();
+  } catch { seen.map = {}; seen.base = new Date().toISOString(); }
+}
+function saveSeen() { try { localStorage.setItem(seenKey(), JSON.stringify({ base: seen.base, map: seen.map })); } catch {} }
+/** Kommentare eines Eintrags als gelesen markieren. */
+export function markSeen(entryId) {
+  const keep = Object.entries(seen.map).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 300);
+  seen.map = { ...Object.fromEntries(keep), [entryId]: new Date().toISOString() };
+  saveSeen();
+}
+export const seenAt = id => seen.map[id] || seen.base;
+/** Neue Kommentare anderer unter einem Eintrag. */
+export const freshCount = id => (seen.base ? reactionsOf(id).filter(r => r.text && r.member_id !== S.meId && r.created_at > seenAt(id)).length : 0);
+
 export const mem = id => byId.get(id) || (id === L.SYSTEM.id ? L.SYSTEM : undefined);
 export const mName = id => mem(id)?.name || 'Jemand';
 export const mEmoji = id => mem(id)?.emoji || '🙂';
@@ -182,7 +218,9 @@ export async function join(link) {
   S.picker = s.members; S.joinError = ''; S.phase = 'who';
 }
 export async function login(member_id, pin) { await api('POST', '/login', { member_id, pin }); await enter(); }
-async function enter() { await loadState(); S.tab = me?.role === 'admin' ? 'uebersicht' : 'heute'; S.phase = 'app'; connect(); }
+/** Zuletzt offener Reiter (übersteht Neuladen). */
+const savedTab = () => { try { return JSON.parse(localStorage.getItem('pp_view') || 'null')?.tab || null; } catch { return null; } };
+async function enter() { await loadState(); loadSeen(); S.tab = savedTab() || (me?.role === 'admin' ? 'uebersicht' : 'heute'); S.phase = 'app'; connect(); }
 export async function switchPerson() { await post('/logout'); await boot(); }
 export async function leave() { await post('/leave'); history.replaceState(null, '', '/'); await boot(); }
 

@@ -6,8 +6,15 @@
   import { S, G, mem, mName, loadOlder } from '../lib/store.svelte.js';
   import { open, tryDo } from '../lib/ui.svelte.js';
   import Review from '../sheets/Review.svelte';
+  import TeamEdit from '../sheets/TeamEdit.svelte';
+  // Team bearbeiten: wer angefangen hat oder selbst dabei ist, bis 24 Stunden nach dem Abhaken; Admins immer
+  const teamEditable = e => (e.helpers.length || e.pending?.length) && (G.admin || ((e.member_id === S.meId || e.helpers.includes(S.meId)) && (e.status === 'started' || S.now - new Date(e.after_at) < 24 * 3600e3)));
 
-  let who = $state('alle'), limit = $state(20), loading = $state(false);
+  // Wie viele Beiträge schon aufgeklappt waren, merken (sonst passt die gemerkte Scrollstelle nach dem Neuladen nicht)
+  const view = () => { try { return JSON.parse(localStorage.getItem('pp_view') || '{}') || {}; } catch { return {}; } };
+  const savedLimit = (() => { const v = view(); return Date.now() - (v.at || 0) < 30 * 60e3 ? Math.max(20, +v.fotosLimit || 20) : 20; })();
+  let who = $state('alle'), limit = $state(savedLimit), loading = $state(false);
+  $effect(() => { const l = limit; try { localStorage.setItem('pp_view', JSON.stringify({ ...view(), fotosLimit: l })); } catch {} });
   const when = e => e.after_at || e.before_at || e.created_at || '';
   // Erst die letzten Wochen aus dem geladenen Zustand, dahinter alles, was nachgeladen wurde. Fotos bleiben dauerhaft.
   const all = $derived.by(() => {
@@ -48,7 +55,7 @@
     <div class="sec-h wide"><h2>{g.label}</h2><span class="cnt">{g.items.length}</span></div>
     {#each g.items as e (e.id)}
       {@const st = e.status === 'started' ? ['brand', 'timer', 'Läuft'] : STATE[e.review] || ['brand', 'eye', 'Neu']}
-      <article class="card">
+      <article class="card" data-anchor={e.id}>
         <div class="row">
           <span class="ava sm">{mem(e.member_id)?.emoji || '🙂'}</span>
           <div class="grow">
@@ -58,6 +65,7 @@
           {#if e.status === 'started' || G.admin || (e.review && L.involved(e, S.meId))}
             <span class="chip c-{st[0]}"><Icon name={st[1]} size={14} />{st[2]}</span>
           {/if}
+          {#if teamEditable(e)}<button class="icb" onclick={() => open(TeamEdit, { id: e.id })} aria-label="Team bearbeiten"><Icon name="users" size={16} />{#if e.pending?.length}<i class="nb">{e.pending.length}</i>{/if}</button>{/if}
         </div>
         <Pair entry={e} likeable={e.status === 'done'} />
         {#if e.status === 'done'}<Reactions entry={e} />{/if}

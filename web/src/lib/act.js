@@ -58,7 +58,11 @@ export async function cancel(e) {
   if (confirm('Abbrechen? Das Vorher-Foto wird gelöscht.')) await tryDo(() => post(`/entries/${e.id}/cancel`));
 }
 export async function join(e) {
-  if (await tryDo(() => post(`/entries/${e.id}/join`))) { rain('🤝💪✨'); toast(`Du hilfst ${mName(e.member_id)} mit!`); }
+  if (await tryDo(() => post(`/entries/${e.id}/join`))) toast(`Anfrage ist raus. ${mName(e.member_id)} muss dich noch bestätigen.`);
+}
+/** Wer angefangen hat: Mithelf-Anfrage annehmen oder ablehnen. */
+export async function decideHelper(e, who, accept) {
+  if (await tryDo(() => post(`/entries/${e.id}/pending`, { member_id: who, accept })) && accept) { rain('🤝💪✨'); toast(`${mName(who)} hilft jetzt mit!`); }
 }
 export const dropEntry = e => confirm('Diese Aufgabe von der Liste nehmen?') && tryDo(() => del(`/entries/${e.id}`));
 /** Admins: PIN einer Person zurücksetzen. Sie legt beim nächsten Öffnen eine neue fest. */

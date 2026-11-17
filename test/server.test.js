@@ -203,7 +203,18 @@ test('Extra-Aufgaben und Mithelfen', async () => {
   assert.equal((await mia.post('/api/entries/adhoc', { kind: 'assign', member_id: LILY, title: 'x', points: 30 })).status, 403);
   r = await mia.post('/api/entries/start', { entry_id: entryOf(r).id, ...photo });
   const running = entryOf(r);
-  assert.deepEqual(entryOf(await lily.post(`/api/entries/${running.id}/join`)).helpers, [LILY]);
+  // Mithelfen ist erst eine Anfrage, Mia bestätigt
+  let j = entryOf(await lily.post(`/api/entries/${running.id}/join`));
+  assert.deepEqual(j.helpers, []);
+  assert.deepEqual(j.pending, [LILY]);
+  assert.equal((await lily.post(`/api/entries/${running.id}/pending`, { member_id: LILY, accept: true })).status, 403); // nicht selbst bestätigen
+  j = entryOf(await mia.post(`/api/entries/${running.id}/pending`, { member_id: LILY, accept: true }));
+  assert.deepEqual(j.helpers, [LILY]);
+  assert.deepEqual(j.pending, []);
+  // wieder raus: man selbst (aus Versehen dabei) oder wer angefangen hat
+  assert.deepEqual(entryOf(await lily.post(`/api/entries/${running.id}/remove-helper`, { member_id: LILY })).helpers, []);
+  await lily.post(`/api/entries/${running.id}/join`);
+  assert.deepEqual(entryOf(await mia.post(`/api/entries/${running.id}/pending`, { member_id: LILY, accept: false })).pending, []);
   assert.equal(entryOf(await mia.post(`/api/entries/${running.id}/cancel`)).status, 'todo'); // Eigenes bleibt auf der Liste
   assert.equal((await mia.post('/api/redeem')).status, 400); // kein Guthaben
 });

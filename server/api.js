@@ -183,12 +183,41 @@ on('POST', '/api/entries/:id/cancel', 'member', ({ p, me }) => {
   delVideo(e.before_video);
   emitEntry(e.id);
 });
+/** Mithelfen ist eine Anfrage: Wer die Aufgabe angefangen hat, bestätigt sie (sonst kann sich jeder Punkte dazuholen). */
 on('POST', '/api/entries/:id/join', 'member', ({ p, me }) => {
   const e = entry(p.id);
   if (e.status !== 'started') throw new Fail(409, 'Die Aufgabe läuft nicht mehr');
-  if (L.involved(e, me.id)) return;
-  patch('entries', e.id, { helpers: [...e.helpers, me.id] });
-  notify(e.member_id, 'Hilfe ist da!', `${me.name} hilft dir bei: ${e.title}`);
+  if (L.involved(e, me.id) || e.pending.includes(me.id)) return;
+  patch('entries', e.id, { pending: [...e.pending, me.id] });
+  notify(e.member_id, `${me.name} möchte mithelfen`, `${e.title}: in der App bestätigen`);
+  emitEntry(e.id);
+});
+/** Wer die Aufgabe angefangen hat (oder ein Admin): eine Mithelf-Anfrage annehmen oder ablehnen. */
+on('POST', '/api/entries/:id/pending', 'member', ({ p, body, me }) => {
+  const e = entry(p.id), who = String(body.member_id || '');
+  if (e.member_id !== me.id && me.role !== 'admin') throw new Fail(403, 'Das entscheidet, wer die Aufgabe angefangen hat');
+  if (!e.pending.includes(who)) return;
+  const pending = e.pending.filter(x => x !== who);
+  if (body.accept && e.status === 'started') {
+    patch('entries', e.id, { pending, helpers: [...new Set([...e.helpers, who])] });
+    notify(who, 'Du bist dabei!', `${nameOf(e.member_id)} hat dich bei „${e.title}“ dazugenommen`);
+  } else patch('entries', e.id, { pending });
+  emitEntry(e.id);
+});
+/**
+ * Jemanden wieder aus dem Team nehmen: wer die Aufgabe angefangen hat, bis 24 Stunden nach dem Abhaken; man selbst
+ * (aus Versehen dabei) ebenso; Admins jederzeit. Die Punkte teilen sich danach automatisch neu auf.
+ */
+on('POST', '/api/entries/:id/remove-helper', 'member', ({ p, body, me }) => {
+  const e = entry(p.id), who = String(body.member_id || '');
+  if (!e.helpers.includes(who)) return;
+  const owner = e.member_id === me.id, self = who === me.id, admin = me.role === 'admin';
+  if (!owner && !self && !admin) throw new Fail(403, 'Das darf nur, wer die Aufgabe angefangen hat');
+  if (!admin && e.status === 'done' && Date.now() - new Date(e.after_at) > 24 * 3600e3) throw new Fail(409, 'Das geht nur bis 24 Stunden nach dem Abhaken. Frag einen Admin.');
+  if (!['started', 'done'].includes(e.status)) throw new Fail(409, 'Hier gibt es kein Team mehr');
+  patch('entries', e.id, { helpers: e.helpers.filter(x => x !== who) });
+  if (!self) notify(who, 'Aus dem Team genommen', `${me.name} hat dich bei „${e.title}“ herausgenommen`);
+  addLog(me, self ? `war bei „${e.title}“ von ${nameOf(e.member_id)} doch nicht dabei und ist ausgetreten` : `hat ${nameOf(who)} aus „${e.title}“ herausgenommen`, [{ t: 'entries', id: e.id, patch: { helpers: e.helpers } }]);
   emitEntry(e.id);
 });
 on('POST', '/api/entries/adhoc', 'member', ({ body, me }) => {

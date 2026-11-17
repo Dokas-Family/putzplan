@@ -8,6 +8,12 @@
   import { involved } from '../../../shared/logic.js';
   let { entry, close } = $props();
   const shots = $derived([['before', 'Vorher'], ['after', 'Nachher']].filter(([k]) => entry[k + '_photo']));
+  /** Das große Foto blendet über das kleine (schon geladene) Vorschaubild, sobald es da ist. */
+  function fade(img) {
+    const done = () => img.classList.add('ready');
+    if (img.complete && img.naturalWidth) done();
+    else img.addEventListener('load', done, { once: true });
+  }
 </script>
 
 <Head title={entry.title} {close} />
@@ -17,7 +23,10 @@
       {#if entry[key + '_video']}
         <video src="/photos/{entry[key + '_video']}" poster="/photos/{entry[key + '_photo']}.jpg" controls playsinline loop muted autoplay preload="metadata"></video>
       {:else}
-        <img src="/photos/{entry[key + '_photo']}.jpg" alt={label} />
+        <span class="zimg">
+          <img class="lo" src="/photos/{entry[key + '_photo']}.t.jpg" alt="" aria-hidden="true" />
+          <img class="hi" use:fade src="/photos/{entry[key + '_photo']}.jpg" alt={label} decoding="async" />
+        </span>
       {/if}
       <span>{label}{entry[key + '_video'] ? ' · Video' : ''}</span>
     </div>
