@@ -110,7 +110,9 @@ export const counts = (e, settings) => e.status === 'done' && !!e.after_at && (!
  * Ein Dienst ist, was jemand bekommen hat: vom Dienstplan, von einem Admin zugewiesen oder „Wer kocht, räumt auf“.
  * Was man sich selbst aussucht, ist kein Dienst.
  */
-export const isDuty = e => !!e && !ADMIN_KINDS.has(e.task_id) && (e.created_by === 'plan' || e.note === 'koch' || (!!e.created_by && e.created_by !== e.member_id));
+export const isDuty = e => !!e && !ADMIN_KINDS.has(e.task_id) && (e.created_by === 'plan' || e.note === 'koch' || !!e.fuer || (!!e.created_by && e.created_by !== e.member_id));
+/** Wer einen Dienst für jemand anderen übernimmt, bekommt so viel obendrauf. */
+export const FUER_BONUS = 1;
 export const isOpen = e => e.status === 'todo' || e.status === 'started';
 /** Der Tag, für den ein Dienst gedacht war. */
 export const dutyDay = e => dKey(new Date(e.created_at));

@@ -121,7 +121,7 @@ export function ensurePlan(d = new Date(), { force = false } = {}) {
 /** Unangefangene Plan-Dienste von heute wieder einsammeln (nur von "memberId" oder von allen). */
 export function takeBack(d = new Date(), memberId = null) {
   const k = L.dKey(d), gone = [];
-  for (const r of q.all("select * from entries where status = 'todo' and created_by = 'plan'")) {
+  for (const r of q.all("select * from entries where status = 'todo' and created_by = 'plan' and fuer is null")) { // Übernommenes bleibt, wo es ist
     if (L.dutyDay(r) !== k || (memberId && r.member_id !== memberId)) continue;
     remove('entries', r.id);
     emitDel('entries', r.id);

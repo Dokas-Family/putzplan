@@ -24,6 +24,12 @@ class Store {
   backup = $state.raw(null); // Zeitpunkt der letzten Sicherung (nur für Admins)
   claude = $state(false); // ist auf dem Server ein Claude-Schlüssel eingetragen? (nur für Admins)
   claudeInfos = $state(''); // was Claude über die Familie wissen soll (nur für Admins)
+  chat = $state.raw([]); // Chat mit Claude: eigene Nachrichten, bei Admins auch die angesehenen der anderen
+  chatBusy = $state.raw({}); // Person → Claude schreibt gerade
+  chatReady = $state(false); // ist Claude für den Chat eingerichtet?
+  chatLast = $state(''); // wann Claude mir zuletzt geschrieben hat (aus dem Zustand)
+  chatSeen = $state(''); // bis wann ich den Chat gelesen habe (pro Gerät)
+  antraege = $state.raw([]); // Anträge an die Admins (Admins: alle offenen, sonst die eigenen)
   preselect = null; // Person, mit der das Gerät in der alten App angemeldet war
 }
 export const S = new Store();
@@ -79,6 +85,14 @@ export const G = {
   /** Erledigte Aufgaben, die noch niemand geprüft hat (älteste zuerst). */
   get queue() { return S.entries.filter(e => e.status === 'done' && !e.review && !L.ADMIN_KINDS.has(e.task_id)).sort((a, b) => (a.after_at || '').localeCompare(b.after_at || '')); },
   get proposals() { return S.tasks.filter(t => t.proposed_by); },
+  /** Offene Anträge, die Claude für die Admins gestellt hat. */
+  get openAntraege() { return S.antraege.filter(a => a.status === 'offen'); },
+  /** Hat Claude mir geschrieben, seit ich zuletzt im Chat war? */
+  get chatNew() {
+    const mine = S.chat.findLast(m => m.member_id === S.meId && m.role === 'claude')?.created_at || '';
+    const last = mine > S.chatLast ? mine : S.chatLast;
+    return !!last && last > (S.chatSeen || '');
+  },
   /** Personen, die auf dem Anmeldeschirm „PIN vergessen“ gedrückt haben. */
   get pinHelp() { return S.members.filter(m => m.pin_help && m.active); },
   /** Die nächtliche Sicherung ist seit über 36 Stunden nicht gelaufen. Ohne Angabe (z. B. lokal) keine Warnung. */
@@ -110,6 +124,20 @@ export const seenAt = id => seen.map[id] || seen.base;
 /** Neue Kommentare anderer unter einem Eintrag. */
 export const freshCount = id => (seen.base ? reactionsOf(id).filter(r => r.text && r.member_id !== S.meId && r.created_at > seenAt(id)).length : 0);
 
+// ---------- Chat ----------
+/** Schreibt Claude gerade? Ältere Meldungen (kleinere Nummer) zählen nicht mehr. */
+export function setChatBusy(r) {
+  const cur = S.chatBusy[r.member_id];
+  if (cur && cur.at > r.at) return;
+  S.chatBusy = { ...S.chatBusy, [r.member_id]: r };
+}
+const chatKey = () => 'pp_chat_' + S.meId;
+export function markChatSeen() {
+  S.chatSeen = new Date().toISOString();
+  try { localStorage.setItem(chatKey(), S.chatSeen); } catch {}
+}
+const loadChatSeen = () => { try { S.chatSeen = localStorage.getItem(chatKey()) || ''; } catch { S.chatSeen = ''; } };
+
 export const mem = id => byId.get(id) || (id === L.SYSTEM.id ? L.SYSTEM : undefined);
 export const mName = id => mem(id)?.name || 'Jemand';
 export const mEmoji = id => mem(id)?.emoji || '🙂';
@@ -138,12 +166,13 @@ export const del = path => api('DELETE', path);
 export function apply(c) {
   if (c.t === 'settings') return void (S.settings = { ...L.DEFAULT_SETTINGS, ...c.row });
   if (c.t === 'say') return void (S.say = { ...c.row, at: Date.now() });
+  if (c.t === 'chatbusy') return void setChatBusy(c.row);
   const list = S[c.t];
   if (!Array.isArray(list)) return;
   if (c.del != null) return void (S[c.t] = list.filter(x => x.id !== c.del));
   if (c.t === 'entries' && S.older.some(x => x.id === c.row.id)) return void (S.older = S.older.map(x => (x.id === c.row.id ? c.row : x)));
   const i = list.findIndex(x => x.id === c.row.id);
-  let next = i < 0 ? (c.t === 'log' || c.t === 'entries' ? [c.row, ...list] : [...list, c.row]) : list.map((x, j) => (j === i ? c.row : x));
+  let next = i < 0 ? (c.t === 'log' || c.t === 'entries' || c.t === 'antraege' ? [c.row, ...list] : [...list, c.row]) : list.map((x, j) => (j === i ? c.row : x));
   if (c.t === 'members') next = next.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.name.localeCompare(b.name));
   S[c.t] = next;
 }
@@ -160,6 +189,9 @@ async function loadState() {
   S.backup = st.backup ?? null;
   S.claude = !!st.claude;
   S.claudeInfos = st.claude_infos || '';
+  S.antraege = st.antraege || [];
+  S.chatReady = !!st.chat?.ready;
+  S.chatLast = st.chat?.last || '';
   // Nach einem Update läuft im Handy noch der alte Stand der App: Hinweis zum Neuladen zeigen
   if (!S.version) S.version = st.version || '';
   else if (st.version && st.version !== S.version) S.update = true;
@@ -220,7 +252,7 @@ export async function join(link) {
 export async function login(member_id, pin) { await api('POST', '/login', { member_id, pin }); await enter(); }
 /** Zuletzt offener Reiter (übersteht Neuladen). */
 const savedTab = () => { try { return JSON.parse(localStorage.getItem('pp_view') || 'null')?.tab || null; } catch { return null; } };
-async function enter() { await loadState(); loadSeen(); S.tab = savedTab() || (me?.role === 'admin' ? 'uebersicht' : 'heute'); S.phase = 'app'; connect(); }
+async function enter() { S.chat = []; S.chatBusy = {}; await loadState(); loadSeen(); loadChatSeen(); S.tab = savedTab() || (me?.role === 'admin' ? 'uebersicht' : 'heute'); S.phase = 'app'; connect(); }
 export async function switchPerson() { await post('/logout'); await boot(); }
 export async function leave() { await post('/leave'); history.replaceState(null, '', '/'); await boot(); }
 

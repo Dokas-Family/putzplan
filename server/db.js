@@ -45,13 +45,23 @@ if (!hasCol('entries', 'before_video')) db.exec('alter table entries add column 
 if (!hasCol('entries', 'ai')) db.exec('alter table entries add column ai text'); // was Claude zu den Fotos meint (JSON)
 if (!hasCol('reactions', 'reply_to')) db.exec('alter table reactions add column reply_to text'); // Antwort auf einen Kommentar
 if (!hasCol('entries', 'pending')) db.exec("alter table entries add column pending text default '[]'"); // wer mithelfen möchte, aber noch nicht bestätigt ist
+if (!hasCol('entries', 'fuer')) db.exec('alter table entries add column fuer text'); // Dienst für jemand anderen übernommen: für wen
+// Chat mit Claude (je Person ein Verlauf) und Anträge, die Claude für die Admins stellt
+db.exec(`
+  create table if not exists chat (id text primary key, member_id text, role text, text text, photo text, actions text default '[]', cost real default 0, created_at text);
+  create index if not exists chat_member on chat (member_id, created_at);
+  create table if not exists antraege (id text primary key, member_id text, kind text, points integer, day text, reason text, proof text, status text default 'offen',
+    by text, decided_by text, decided_at text, note text, created_at text);
+`);
 export { markDuties };
 
 const COLS = {
   members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help'],
   tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
-  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai', 'pending'],
+  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai', 'pending', 'fuer'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at', 'reply_to'],
+  chat: ['id', 'member_id', 'role', 'text', 'photo', 'actions', 'cost', 'created_at'],
+  antraege: ['id', 'member_id', 'kind', 'points', 'day', 'reason', 'proof', 'status', 'by', 'decided_by', 'decided_at', 'note', 'created_at'],
 };
 const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active', 'pflicht'] };
 const val = v => (v === undefined ? null : v === true ? 1 : v === false ? 0 : v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
@@ -85,6 +95,7 @@ export function out(table, r) {
     try { o.pending = JSON.parse(o.pending || '[]'); } catch { o.pending = []; }
     if (!Array.isArray(o.pending)) o.pending = [];
   }
+  if (table === 'chat') { try { o.actions = JSON.parse(o.actions || '[]'); } catch { o.actions = []; } delete o.cost; } // was es kostet, sieht nur der Admin-Überblick
   if (table === 'members') { o.has_pin = !!o.pin_hash; delete o.pin_hash; }
   if (table === 'log') { o.can_undo = !!o.undo && !o.undone; delete o.undo; o.undone = !!o.undone; }
   return o;

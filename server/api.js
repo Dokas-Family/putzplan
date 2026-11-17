@@ -5,6 +5,7 @@ import { on, Fail, now, emit, emitDel, emitSettings, emitSay, hashPin, checkPin,
 import { notify, publicKey } from './push.js';
 import { ensurePlan, initPlan, takeBack, freeUp, tell } from './plan.js';
 import { soon, reviewNow, reviewerReady, heard } from './reviewer.js';
+import { antraegeFor, chatLast, chatReady } from './chat.js';
 import * as L from '../shared/logic.js';
 
 // ---------- Helfer ----------
@@ -101,6 +102,8 @@ on('GET', '/api/state', 'member', ({ me }) => {
     backup: me.role === 'admin' ? lastBackup() : undefined,
     claude: me.role === 'admin' ? reviewerReady() : undefined, // ist ein API-Schlüssel eingetragen?
     claude_infos: me.role === 'admin' ? getMeta('claude_infos') || '' : undefined, // was Claude über die Familie wissen soll
+    antraege: antraegeFor(me), // Anträge, die Claude für die Admins gestellt hat
+    chat: { ready: chatReady(), last: chatLast(me.id) },
     older: !!q.get("select 1 as x from entries where created_at < ? and status = 'done' limit 1", since40()),
   };
 });
@@ -155,7 +158,7 @@ on('POST', '/api/entries/:id/finish', 'member', ({ p, body, me }) => {
   const wait = (+settings().min_minutes || 0) * 60e3 - (Date.now() - new Date(e.before_at));
   if (wait > 0) throw new Fail(400, `So schnell? Noch ${Math.ceil(wait / 60e3)} Min. Erst putzen, dann Foto!`);
   const t = e.task_id === 'wasch' ? L.WASCH : row('tasks', e.task_id);
-  const points = e.task_id === 'adhoc' ? (+e.points || 2) : t ? L.ptsOf(t) : 1;
+  const points = (e.task_id === 'adhoc' ? (+e.points || 2) : t ? L.ptsOf(t) : 1) + (e.fuer ? L.FUER_BONUS : 0); // für jemand anderen: Bonus obendrauf
   patch('entries', e.id, { status: 'done', after_photo: savePhoto(e.id + '-n', body.photo, body.thumb), after_at: now(), points, review: null, review_note: null });
   emitEntry(e.id);
   soon(e.id); // Claude schaut gleich drauf
@@ -218,6 +221,20 @@ on('POST', '/api/entries/:id/remove-helper', 'member', ({ p, body, me }) => {
   patch('entries', e.id, { helpers: e.helpers.filter(x => x !== who) });
   if (!self) notify(who, 'Aus dem Team genommen', `${me.name} hat dich bei „${e.title}“ herausgenommen`);
   addLog(me, self ? `war bei „${e.title}“ von ${nameOf(e.member_id)} doch nicht dabei und ist ausgetreten` : `hat ${nameOf(who)} aus „${e.title}“ herausgenommen`, [{ t: 'entries', id: e.id, patch: { helpers: e.helpers } }]);
+  emitEntry(e.id);
+});
+/**
+ * Einen offenen Dienst von jemand anderem übernehmen (z. B. „Iris hat gekocht, ich räume für sie auf“).
+ * Wer übernimmt, bekommt die Punkte und einen Bonuspunkt obendrauf. Die andere Person hat den Dienst dann nicht mehr.
+ */
+on('POST', '/api/entries/:id/takeover', 'member', ({ p, me }) => {
+  const e = entry(p.id), from = e.member_id;
+  if (from === me.id) throw new Fail(409, 'Das ist schon dein Dienst');
+  if (e.status !== 'todo') throw new Fail(409, e.status === 'started' ? `${nameOf(from)} ist schon dran. Frag lieber, ob du mithelfen kannst.` : 'Dieser Dienst ist schon vorbei');
+  if (!L.isDuty(e)) throw new Fail(400, 'Übernehmen geht nur bei Diensten');
+  patch('entries', e.id, { member_id: me.id, slot: e.task_id === 'adhoc' ? me.id : e.slot, fuer: e.fuer || from });
+  notify(from, 'Dienst übernommen', `${me.name} macht „${e.title}“ für dich`);
+  addLog(me, `übernimmt „${e.title}“ für ${nameOf(from)}`, [{ t: 'entries', id: e.id, patch: { member_id: from, slot: e.slot, fuer: e.fuer }, only: { status: 'todo' } }]);
   emitEntry(e.id);
 });
 on('POST', '/api/entries/adhoc', 'member', ({ body, me }) => {

@@ -64,6 +64,11 @@ export async function join(e) {
 export async function decideHelper(e, who, accept) {
   if (await tryDo(() => post(`/entries/${e.id}/pending`, { member_id: who, accept })) && accept) { rain('🤝💪✨'); toast(`${mName(who)} hilft jetzt mit!`); }
 }
+/** Einen offenen Dienst von jemand anderem übernehmen: Punkte und ein Bonuspunkt für mich. */
+export async function takeover(e) {
+  if (!confirm(`„${e.title}“ für ${mName(e.member_id)} übernehmen? Du bekommst die Punkte und +1 Bonus, ${mName(e.member_id)} hat den Dienst dann nicht mehr.`)) return;
+  if (await tryDo(() => post(`/entries/${e.id}/takeover`))) { rain('🦸✨🤝'); toast(`Übernommen. ${mName(e.member_id)} bekommt Bescheid.`); }
+}
 export const dropEntry = e => confirm('Diese Aufgabe von der Liste nehmen?') && tryDo(() => del(`/entries/${e.id}`));
 /** Admins: PIN einer Person zurücksetzen. Sie legt beim nächsten Öffnen eine neue fest. */
 export async function resetPin(m) {

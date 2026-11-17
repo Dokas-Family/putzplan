@@ -13,7 +13,8 @@
   const two = n => String(n).padStart(2, '0');
   const TYPES = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   const videoType = () => (typeof MediaRecorder === 'undefined' ? null : TYPES.find(t => MediaRecorder.isTypeSupported(t)) || null);
-  const canVideo = !!videoType();
+  const canVideo = !!videoType() && kind !== 'beweis'; // Nachweis für Claude: nur Foto
+  const TAG = { before: 'VORHER', after: 'NACHHER', beweis: 'NACHWEIS' };
 
   async function start() {
     stop();
@@ -41,7 +42,7 @@
   }
   function still(source, sw, sh) {
     const cv = canvas(source, sw, sh, 1280), g = cv.getContext('2d'), d = new Date();
-    const stamp = `${G.me?.name || ''} · ${kind === 'after' ? 'NACHHER' : 'VORHER'} · ${two(d.getDate())}.${two(d.getMonth() + 1)}. ${two(d.getHours())}:${two(d.getMinutes())}`;
+    const stamp = `${G.me?.name || ''} · ${TAG[kind] || 'VORHER'} · ${two(d.getDate())}.${two(d.getMonth() + 1)}. ${two(d.getHours())}:${two(d.getMinutes())}`;
     const fs = Math.max(14, Math.round(cv.width / 32));
     g.font = `bold ${fs}px system-ui,sans-serif`;
     g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, cv.height - fs * 1.8, cv.width, fs * 1.8);
@@ -100,7 +101,7 @@
 </script>
 
 <div class="cam">
-  <div class="cap"><span class="tag" class:after={kind === 'after'}>{kind === 'after' ? 'NACHHER' : 'VORHER'}{mode === 'video' ? '-Video' : '-Foto'}</span><br />{label}</div>
+  <div class="cap"><span class="tag" class:after={kind === 'after'}>{TAG[kind] || 'VORHER'}{mode === 'video' ? '-Video' : '-Foto'}</span><br />{label}</div>
   <div class="stage">
     {#if shot?.url}
       <video src={shot.url} autoplay loop muted playsinline></video>

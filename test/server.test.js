@@ -439,6 +439,77 @@ test('Antworten auf Kommentare, Claude antwortet wenn angesprochen, Familien-Inf
   assert.ok(!('claude_infos' in (await mia.get('/api/state'))));
 });
 
+test('Dienst übernehmen: zählt für die Person, die ihn macht, mit einem Bonuspunkt', async () => {
+  await admin.put('/api/settings', { min_minutes: 0 });
+  let st = await admin.get('/api/state');
+  const tasks = new Map(st.tasks.map(t => [t.id, t]));
+  const dev = { [ADMIN]: admin, [MIA]: mia, [LILY]: lily };
+  const duty = st.entries.find(e => e.created_by === 'plan' && e.status === 'todo' && e.member_id !== MIA && dev[e.member_id]);
+  assert.ok(duty, 'es gibt einen offenen Dienst von jemand anderem');
+  const owner = dev[duty.member_id];
+  assert.equal((await owner.post(`/api/entries/${duty.id}/takeover`)).status, 409); // den eigenen nicht
+  const e = entryOf(await mia.post(`/api/entries/${duty.id}/takeover`));
+  assert.equal(e.member_id, MIA);
+  assert.equal(e.fuer, duty.member_id);
+  assert.ok(L.isDuty(e), 'bleibt ein Dienst');
+  assert.equal((await owner.post('/api/entries/start', { entry_id: duty.id, ...photo })).status, 403); // gehört jetzt Mia
+  assert.equal(entryOf(await mia.post('/api/entries/start', { entry_id: duty.id, ...photo })).status, 'started');
+  assert.equal((await lily.post(`/api/entries/${duty.id}/takeover`)).status, 409); // läuft schon
+  const done = await mia.post(`/api/entries/${duty.id}/finish`, photo);
+  assert.equal(done.points, L.ptsOf(tasks.get(duty.task_id)) + L.FUER_BONUS);
+  st = await admin.get('/api/state');
+  assert.ok(st.log.some(l => l.text.includes('übernimmt') && l.can_undo));
+});
+
+test('Chat mit Claude: eigener Verlauf, Admins lesen mit, Bonus nur mit Beweis, Anträge, Grenze pro Monat', async () => {
+  const chatOf = r => (r.changes || []).filter(c => c.t === 'chat').map(c => c.row);
+  let r = await mia.post('/api/chat', { text: 'Hallo Claude' });
+  assert.ok(r.id);
+  assert.ok(chatOf(r).some(m => m.role === 'claude' && /Probe-Antwort an Mia/.test(m.text)), 'Claude antwortet');
+  const mine = await mia.get('/api/chat');
+  assert.equal(mine.messages.length, 2);
+  assert.ok(mine.messages.every(m => !('cost' in m)), 'Kosten sieht niemand im Chat');
+  // Fremde Chats: nur Admins
+  assert.equal((await lily.get(`/api/chat?member=${MIA}`)).status, 403);
+  assert.equal((await admin.get(`/api/chat?member=${MIA}`)).messages.length, 2);
+  const people = (await admin.get('/api/chat/people')).people;
+  assert.ok(people.find(p => p.member_id === MIA).month > 0);
+  assert.equal((await mia.get('/api/chat/people')).status, 403);
+
+  // Bonus von Claude: ohne Foto nicht, mit Foto schon
+  r = await mia.post('/api/chat', { text: '!bonus' });
+  assert.match(chatOf(r).find(m => m.role === 'claude').text, /kein Foto/);
+  r = await mia.post('/api/chat', { text: '!bonus', ...photo });
+  const answer = chatOf(r).find(m => m.role === 'claude');
+  assert.equal(answer.actions[0].text, '+1 Bonus für Mia');
+  const bonus = r.changes.find(c => c.t === 'entries' && c.row.task_id === 'bonus').row;
+  assert.equal(bonus.created_by, 'claude');
+  assert.equal(bonus.points, 1);
+  assert.ok((await admin.get('/api/state')).log.some(l => l.member_id === 'claude' && /belohnt/.test(l.text) && l.can_undo));
+
+  // Antrag an die Admins: Mia sieht ihn, Lily nicht, entscheiden nur Admins
+  r = await mia.post('/api/chat', { text: '!antrag' });
+  const a = r.changes.find(c => c.t === 'antraege').row;
+  assert.equal(a.status, 'offen');
+  assert.ok((await mia.get('/api/state')).antraege.some(x => x.id === a.id));
+  assert.ok(!(await lily.get('/api/state')).antraege.some(x => x.id === a.id));
+  assert.equal((await mia.post(`/api/antraege/${a.id}/decide`, { accept: true })).status, 403);
+  r = await admin.post(`/api/antraege/${a.id}/decide`, { accept: true, note: 'Verdient' });
+  assert.equal(r.antrag.status, 'angenommen');
+  assert.ok(r.changes.some(c => c.t === 'entries' && c.row.task_id === 'bonus' && c.row.points === 4 && c.row.member_id === MIA));
+  assert.ok((await mia.get('/api/chat')).messages.some(m => m.role === 'claude' && /angenommen/.test(m.text)));
+  assert.equal((await admin.post(`/api/antraege/${a.id}/decide`, { accept: false })).status, 409); // nur einmal
+
+  // Grenze pro Monat: Mitglieder ja, Admins nicht. Die App nennt keine Beträge.
+  const iso = new Date().toISOString();
+  db.prepare("insert into chat (id, member_id, role, text, cost, created_at) values ('teuer-lily', ?, 'claude', 'x', 11, ?), ('teuer-admin', ?, 'claude', 'x', 50, ?)").run(LILY, iso, ADMIN, iso);
+  r = await lily.post('/api/chat', { text: 'Noch eine Frage' });
+  assert.equal(r.status, 429);
+  assert.ok(!/€|\d/.test(r.error));
+  assert.equal((await lily.get('/api/chat')).limit, true);
+  assert.ok((await admin.post('/api/chat', { text: 'Hallo' })).id);
+});
+
 test('www leitet auf die Hauptadresse um, die Version ist abfragbar', async () => {
   const r = await fetch(BASE + '/abc?x=1', { redirect: 'manual', headers: { 'X-Forwarded-Host': 'www.putzplan.test' } });
   assert.equal(r.status, 301);

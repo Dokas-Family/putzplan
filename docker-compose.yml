@@ -17,6 +17,8 @@ services:
       PUSH_CONTACT: ${PUSH_CONTACT:-${APP_URL:-mailto:putzplan@example.com}}
       # Schlüssel für die Claude-API (platform.claude.com). Ohne ihn kommentiert und prüft Claude nichts.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Chat mit Claude: höchstens so viele Euro API-Kosten pro Person und Monat (Admins ohne Grenze)
+      CHAT_LIMIT_EUR: ${CHAT_LIMIT_EUR:-10}
     volumes:
       - ./data:/data
     networks:

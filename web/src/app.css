@@ -259,3 +259,42 @@ button.chip{border:0;color:inherit}
 .rain span{position:absolute;top:-60px;animation:fall linear forwards}
 @keyframes fall{to{transform:translateY(calc(100vh + 80px)) rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.rain{display:none}}
+
+/* Chat mit Claude */
+.chat{display:flex;flex-direction:column;min-height:calc(100dvh - 116px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+.chat .top h1{display:flex;align-items:center;gap:8px}
+.cav.big{width:40px;height:40px;font-size:20px}
+.msgs{flex:1;display:flex;flex-direction:column;gap:10px;padding-bottom:10px}
+.cm{display:flex;gap:8px;align-items:flex-end;max-width:88%}
+.cm.me{align-self:flex-end;flex-direction:row-reverse}
+.cbub{background:var(--card);border:2px solid var(--line);border-radius:16px 16px 16px 4px;padding:9px 12px 6px;min-width:0;overflow-wrap:anywhere}
+.cm.claude .cbub{background:color-mix(in srgb,var(--brand) 9%,var(--card));border-color:color-mix(in srgb,var(--brand) 25%,var(--line))}
+.cm.me .cbub{background:var(--brand);border-color:var(--brand);color:#fff;border-radius:16px 16px 4px 16px}
+.cbub p{margin:0 0 4px;white-space:pre-wrap}
+.ctime{display:block;text-align:right;font-size:10.5px;margin-top:2px;opacity:.75}
+.cm.me .ctime{color:#fff}
+.cacts{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 2px}
+.cacts .chip{background:var(--card);color:var(--ct);white-space:normal}
+.cphoto{display:block;margin:-2px -6px 6px;border-radius:12px;overflow:hidden}
+.cphoto img{display:block;width:180px;max-width:100%;height:auto}
+.cday{align-self:center;font-size:11.5px;font-weight:700;color:var(--muted);background:var(--soft);padding:2px 10px;border-radius:99px;margin:6px 0 0}
+.suggest{display:flex;flex-wrap:wrap;gap:6px;margin-left:38px}
+.suggest .chip{padding:7px 11px;font-size:13px;background:var(--card);border:2px solid var(--line);white-space:normal;text-align:left}
+.typing{display:flex;gap:4px;padding:12px 14px}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--brand-t);animation:blink 1s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+.composer{position:sticky;bottom:calc(66px + env(safe-area-inset-bottom));background:var(--bg);padding:8px 0 2px;margin-top:auto;z-index:5}
+.cin{display:flex;align-items:flex-end;gap:6px;background:var(--card);border:2px solid var(--line);border-radius:18px;padding:5px;box-shadow:0 3px 0 var(--edge)}
+.cin textarea{flex:1;min-width:0;border:0;background:none;resize:none;outline:none;padding:7px 4px;max-height:132px;line-height:1.35}
+.cin .icb{width:38px;height:38px;border-radius:13px}
+.cin .send{width:42px;min-height:38px;padding:0;border-radius:13px}
+.cshot{display:flex;align-items:center;gap:10px;background:var(--card);border:2px solid var(--line);border-radius:14px;padding:6px;margin-bottom:6px;font-size:13px;font-weight:700}
+.cshot img{width:44px;height:44px;object-fit:cover;border-radius:9px}
+.cnote{text-align:center;margin-top:5px;font-size:11px}
+.composer .hint{text-align:center;margin:0 0 6px}
+.clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}
+.cbig{display:block;width:100%;border-radius:14px}
+.antrag .why{margin:8px 0;font-weight:600}
+button.dchip.todo{cursor:pointer;border:1.5px dashed var(--edge);color:var(--ink)}
+@media(min-width:900px){.composer{bottom:12px}.chat{min-height:calc(100dvh - 62px)}}

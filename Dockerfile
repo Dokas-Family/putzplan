@@ -8,7 +8,8 @@ RUN npm run build && npm test
 
 # Stufe 2: nur das, was zum Laufen nötig ist
 FROM node:24-alpine
-RUN apk add --no-cache tzdata
+# ffmpeg: Standbilder aus Videos, damit Claude sich die Videos ansehen kann
+RUN apk add --no-cache tzdata ffmpeg
 WORKDIR /app
 LABEL app=putzplan
 # Kurze Git-Kennung des Standes, wird von scripts/deploy.sh mitgegeben und in der App unter „Ich“ angezeigt

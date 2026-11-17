@@ -129,6 +129,18 @@ docker exec -i putzplan node server/claude.js - < kommentare.json
 
 Die Datei enthält eine Liste wie `[{ "entry_id": "…", "text": "…" }, { "entry_id": "…", "emoji": "👏" }]`.
 
+Mit `ANTHROPIC_API_KEY` sieht sich Claude neue Einträge selbst an. Aus Videos schneidet der Server dafür bis zu sechs Standbilder (ffmpeg im Container), weil die API keine Videos annimmt.
+
+### Chat mit Claude
+
+Im Reiter „Claude“ kann jede Person mit Claude schreiben (Opus 5.5, Aufwand „medium“). Claude sieht alles, was die App weiß, und handelt mit genau den Rechten der Person, die schreibt.
+
+- Selbst entscheiden darf Claude nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag.
+- Alles andere wird ein Antrag. Die Admins sehen ihn in der Übersicht unter „Wartet auf dich“ und nehmen an oder lehnen ab.
+- Offene Dienste anderer lassen sich übernehmen (im Chat oder unter „Wer hat heute was?“): Punkte plus 1 Bonuspunkt.
+- Admins sehen unter „Alle Chats“ jeden Verlauf und was er diesen Monat gekostet hat. Alle anderen sehen keine Beträge.
+- Grenze: 10 € API-Kosten pro Person und Monat, Admins ohne Grenze (`CHAT_LIMIT_EUR` in der `.env` ändert das).
+
 ## PIN vergessen
 
 Auf dem Anmeldeschirm gibt es unter dem Ziffernfeld „PIN vergessen?“. Das meldet sich bei den Admins: in der Übersicht steht dann „PIN vergessen: Name“, ein Tipp setzt die PIN zurück. Danach legt die Person beim nächsten Öffnen eine neue fest. Admins können eine PIN auch jederzeit über die Person zurücksetzen.

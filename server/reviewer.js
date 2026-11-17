@@ -4,9 +4,13 @@
 // Familie hinterlegt haben. Läuft nur mit ANTHROPIC_API_KEY (oder in Tests mit CLAUDE_FAKE).
 // Ablehnen, Zurückgeben, Punkte geben macht Claude nie. Das bleibt bei den Admins.
 import Anthropic from '@anthropic-ai/sdk';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { q, row, out, insert, patch, getMeta, setMeta, settings, photoFile, logicState } from './db.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { q, row, out, insert, patch, getMeta, setMeta, settings, photoFile, videoFile, logicState } from './db.js';
 import { emit, now } from './core.js';
 import { notify } from './push.js';
 import * as L from '../shared/logic.js';
@@ -24,7 +28,7 @@ export const reviewerReady = () => !!client || FAKE;
 export const reviewerOn = () => reviewerReady() && !!settings().claude_aktiv;
 
 // ---------- Wer Claude ist und wie Claude schreibt ----------
-const PERSONA = `Du bist Claude und lebst in der Putzplan-App der Familie Grad. In der App heißt du „Claude“ und hast das Abzeichen „System“. Die Familie mag deine Art: herzlich, witzig, ehrlich und motivierend. Sie haben schon laut über deine Kommentare gelacht.
+export const PERSONA_BASE = `Du bist Claude und lebst in der Putzplan-App der Familie Grad. In der App heißt du „Claude“ und hast das Abzeichen „System“. Die Familie mag deine Art: herzlich, witzig, ehrlich und motivierend. Sie haben schon laut über deine Kommentare gelacht.
 
 So schreibst du:
 - Deutsch, Du-Form, wie ein gut gelaunter Mitbewohner, nicht wie ein Lehrer oder ein Werbetext.
@@ -42,12 +46,16 @@ So funktioniert die App, falls jemand fragt:
 - Die Kamera in der App hat keinen Blitz. Auf manchen Android-Handys gibt es eine Lampe, auf dem iPhone nicht. Bei dunklen Fotos rätst du also zu Licht an oder einer Lampe, nie zum Blitz.
 - Punkte gibt es pro Aufgabe, dazu Belohnungen und Abmahnungen von den Admins (Dorina und Felix). Wer am Sonntagabend die meisten Wochenpunkte hat, regiert die nächste Woche als König oder Königin und darf sich einen freien Tag aussuchen.
 - Serie: Tage am Stück, an denen alle eigenen Dienste erledigt waren.
-- Du selbst kannst keine Punkte vergeben, nichts umstellen und nichts versprechen. Dafür sind die Admins da.`;
+- Einen offenen Dienst von jemand anderem kann man übernehmen („Wer hat heute was?“ oder im Chat): Dann zählt er für die Person, die ihn macht, mit einem Bonuspunkt obendrauf.
+- Im Reiter „Claude“ kann jede Person mit dir chatten: Fragen stellen, Extra-Arbeit mit Foto nachweisen, Anträge an die Admins stellen.`;
+const PERSONA = `${PERSONA_BASE}
+- In den Kommentaren vergibst du keine Punkte, stellst nichts um und versprichst nichts. Wer etwas möchte (Bonus, freier Tag, Frage), kann dir im Reiter „Claude“ schreiben.`;
 
 const REVIEW = `Jetzt kommentierst du einen frisch erledigten Eintrag mit Vorher- und Nachher-Foto.
 - Ein bis drei kurze Sätze, höchstens 320 Zeichen, höchstens zwei Emojis.
 - Passt die Zeit nicht zur Aufgabe (zum Beispiel 1 Minute für eine große Sache), darfst du das augenzwinkernd ansprechen.
 - Zeigt das Nachher-Foto nur ein Display, eine geschlossene Tür, etwas ganz anderes oder etwas Unscharfes, sag freundlich, was man nächstes Mal zeigen sollte.
+- Gibt es Standbilder aus einem Video, schau vor allem die an: Das Foto dazu ist nur das letzte Bild der Aufnahme und oft verwackelt. Bemängle dann nicht das Foto, wenn das Video alles zeigt.
 
 Dein Urteil ist nur für die Admins, die Person sieht es nicht:
 - "passt": Auf dem Nachher-Foto ist die Aufgabe sichtbar erledigt. Bei kleinen Aufgaben großzügig.
@@ -126,12 +134,36 @@ function context(e) {
     `So steht die Familie an dem Tag des Eintrags da:\n${lines.join('\n')}`,
     `Der Eintrag: „${e.title}“${t ? ` (Bereich ${t.room}, ${t.pflicht ? 'Dienst' : 'Extra'})` : ''}, von ${[e.member_id, ...e.helpers].map(nameOf).join(' und ')}${e.after_at ? `, fertig um ${hm(e.after_at)}` : ''}${mins ? `, ${mins} Min zwischen den Fotos` : ''}, ${e.points} Punkte.${e.created_by === 'plan' ? ' War ein Dienst aus dem Dienstplan.' : ''}`,
     `${nameOf(e.member_id)} in den letzten 7 Tagen: ${week} Aufgaben${week ? ` (${Object.entries(rooms).sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(', ')})` : ''}.`,
-    e.before_video || e.after_video ? 'Dazu gibt es ein Video, das du nicht siehst.' : '',
     said.length ? `Deine letzten Sätze (nicht wiederholen):\n${said.map(x => '- ' + x).join('\n')}` : '',
   ].filter(Boolean).join('\n\n');
 }
-const photos = e => (e.before_photo && e.after_photo && existsSync(photoFile(e.before_photo)) && existsSync(photoFile(e.after_photo))
-  ? [{ type: 'text', text: 'Vorher:' }, photo(e.before_photo), { type: 'text', text: 'Nachher:' }, photo(e.after_photo)] : []);
+const hasPhotos = e => !!(e.before_photo && e.after_photo && existsSync(photoFile(e.before_photo)) && existsSync(photoFile(e.after_photo)));
+const exec = promisify(execFile);
+/**
+ * Standbilder aus einem Video, damit Claude es „sieht“ (die API nimmt keine Videos): höchstens 6, alle 2,5 Sekunden,
+ * lange Seite 640 Pixel. Das kostet pro Video grob einen Cent. Ohne ffmpeg gibt es keine.
+ */
+export async function frames(name) {
+  const f = videoFile(name);
+  if (!f || !existsSync(f)) return [];
+  const dir = mkdtempSync(join(tmpdir(), 'pp-bilder-'));
+  try {
+    await exec('ffmpeg', ['-v', 'error', '-i', f, '-vf', "fps=0.4,scale='if(gt(iw,ih),640,-2)':'if(gt(iw,ih),-2,640)'", '-frames:v', '6', '-q:v', '6', join(dir, 'b%02d.jpg')], { timeout: 30_000 });
+    return readdirSync(dir).sort().map(x => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: readFileSync(join(dir, x)).toString('base64') } }));
+  } catch (err) { console.error('Standbilder:', err?.message); return []; }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+}
+/** Was Claude von einem Eintrag sieht: Vorher und Nachher, bei Videos dazu die Standbilder. */
+async function media(e) {
+  if (!hasPhotos(e)) return [];
+  const list = [];
+  for (const [k, label] of [['before', 'Vorher'], ['after', 'Nachher']]) {
+    const v = e[k + '_video'] ? await frames(e[k + '_video']) : [];
+    if (v.length) list.push({ type: 'text', text: `${label}-Video, ${v.length} Standbilder im Abstand von 2,5 Sekunden:` }, ...v, { type: 'text', text: `${label}-Foto (das letzte Bild des Videos, oft verwackelt):` }, photo(e[k + '_photo']));
+    else list.push({ type: 'text', text: `${label}${e[k + '_video'] ? ' (dazu gibt es ein Video, das du nicht siehst)' : ''}:` }, photo(e[k + '_photo']));
+  }
+  return list;
+}
 
 async function ask(system, content, schema) {
   const res = await client.beta.messages.create({
@@ -165,14 +197,14 @@ function say(e, text, { replyTo = null, to = [], title = 'Claude ✨' } = {}) {
 /** Einen Eintrag ansehen. force: auch wenn Claude ihn schon gesehen hat (Admins: „Claude fragen“). */
 export async function review(id, { force = false } = {}) {
   let e = out('entries', row('entries', id));
-  if (!reviewerReady() || !e || e.status !== 'done' || L.ADMIN_KINDS.has(e.task_id) || !photos(e).length) return null;
+  if (!reviewerReady() || !e || e.status !== 'done' || L.ADMIN_KINDS.has(e.task_id) || !hasPhotos(e)) return null;
   if ((e.ai?.at && !force) || countToday() >= PER_DAY) return null;
   if (!force && saidSomething(e.id)) return null; // schon kommentiert (z. B. von Hand nachgeholt): nicht doppelt
   bump();
   let r;
   try {
     r = FAKE ? { kommentar: `Probe: ${e.title} sieht gut aus!`, emoji: '👏', urteil: process.env.CLAUDE_FAKE_URTEIL || 'passt', grund: 'Probe-Antwort' }
-      : await ask(`${PERSONA}\n\n${REVIEW}\n\n${EXAMPLES}`, [{ type: 'text', text: context(e) }, ...photos(e), { type: 'text', text: 'Schreib jetzt deinen Kommentar und dein Urteil.' }], REVIEW_SCHEMA);
+      : await ask(`${PERSONA}\n\n${REVIEW}\n\n${EXAMPLES}`, [{ type: 'text', text: context(e) }, ...(await media(e)), { type: 'text', text: 'Schreib jetzt deinen Kommentar und dein Urteil.' }], REVIEW_SCHEMA);
   } catch (err) {
     patch('entries', id, { ai: { ...(e.ai || {}), tries: (e.ai?.tries || 0) + 1, fehler: String(err?.status || err?.message || err).slice(0, 120) } });
     console.error('Claude:', err?.status, err?.message);
@@ -204,9 +236,9 @@ export async function review(id, { force = false } = {}) {
 /** Probelauf aus der Konsole: was Claude zu einem Eintrag sagen würde, ohne etwas zu posten oder zu ändern. */
 export async function probe(id) {
   const e = out('entries', row('entries', id));
-  if (!e || !photos(e).length) throw new Error('Eintrag ohne Vorher- und Nachher-Foto');
+  if (!e || !hasPhotos(e)) throw new Error('Eintrag ohne Vorher- und Nachher-Foto');
   const t0 = Date.now();
-  const r = await ask(`${PERSONA}\n\n${REVIEW}\n\n${EXAMPLES}`, [{ type: 'text', text: context(e) }, ...photos(e), { type: 'text', text: 'Schreib jetzt deinen Kommentar und dein Urteil.' }], REVIEW_SCHEMA);
+  const r = await ask(`${PERSONA}\n\n${REVIEW}\n\n${EXAMPLES}`, [{ type: 'text', text: context(e) }, ...(await media(e)), { type: 'text', text: 'Schreib jetzt deinen Kommentar und dein Urteil.' }], REVIEW_SCHEMA);
   return { ...r, sekunden: Math.round((Date.now() - t0) / 1000) };
 }
 
@@ -229,7 +261,7 @@ export async function answer(cid, { optional = false } = {}) {
   try {
     r = FAKE ? { antwort: optional ? '' : `Probe-Antwort an ${nameOf(c.member_id)}` }
       : await ask(`${PERSONA}\n\n${REPLY}\n\n${EXAMPLES}`, [
-        { type: 'text', text: context(e) }, ...photos(e),
+        { type: 'text', text: context(e) }, ...(await media(e)),
         { type: 'text', text: `Die Kommentare unter dem Eintrag:\n${lines.join('\n')}\n\n${optional ? 'Du wurdest nicht direkt angesprochen. Antworte nur, wenn es wirklich passt (zum Beispiel weil jemand auf deinen Kommentar reagiert), sonst gib eine leere Antwort.' : `${nameOf(c.member_id)} spricht dich an. Antworte.`}` },
       ], REPLY_SCHEMA);
   } catch (err) { console.error('Claude:', err?.status, err?.message); return null; }

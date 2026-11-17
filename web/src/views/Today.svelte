@@ -3,7 +3,7 @@
   import Icon from '../parts/Icon.svelte';
   import Ring from '../parts/Ring.svelte';
   import { S, G, mem, mName, taskOf } from '../lib/store.svelte.js';
-  import { start, finish, redo, cancel, join, dropEntry, redeem, decideHelper } from '../lib/act.js';
+  import { start, finish, redo, cancel, join, dropEntry, redeem, decideHelper, takeover } from '../lib/act.js';
   import { open, toast } from '../lib/ui.svelte.js';
   import { roomOf } from '../lib/rooms.js';
   import Extra from '../sheets/Extra.svelte';
@@ -15,7 +15,7 @@
   const my = $derived(c.per[me.id]);
   const mins = iso => Math.max(0, Math.floor((S.now - new Date(iso)) / 60000));
   const roomName = e => (e.task_id === 'adhoc' ? 'Extra' : taskOf(e.task_id)?.room || 'Extra');
-  const ptsFor = e => (e.task_id === 'adhoc' ? e.points : L.ptsOf(taskOf(e.task_id)));
+  const ptsFor = e => (e.task_id === 'adhoc' ? e.points : L.ptsOf(taskOf(e.task_id))) + (e.fuer ? L.FUER_BONUS : 0);
   const locked = $derived(G.extrasLocked);
   const lockHint = () => toast(`Erst deine Dienste, dann Extras. Noch ${G.myOpen.length} offen.`);
 
@@ -132,7 +132,7 @@
       {#each duties as e (e.id)}
         <div class="row">
           {@render tile(roomName(e))}
-          <div class="grow"><b>{e.title}</b><small><span class="pts">+{ptsFor(e)} P</span>{e.created_by === 'plan' ? '' : e.note === 'koch' ? ' · wer kocht, räumt auf' : ` · von ${mName(e.created_by)}`}{#if L.dutyDay(e) < c.today} · <span class="late">seit {L.DAYS[L.isoDay(new Date(e.created_at))]}</span>{/if}</small></div>
+          <div class="grow"><b>{e.title}</b><small><span class="pts">+{ptsFor(e)} P</span>{e.fuer ? ` · für ${mName(e.fuer)}` : e.created_by === 'plan' ? '' : e.note === 'koch' ? ' · wer kocht, räumt auf' : ` · von ${mName(e.created_by)}`}{#if L.dutyDay(e) < c.today} · <span class="late">seit {L.DAYS[L.isoDay(new Date(e.created_at))]}</span>{/if}</small></div>
           <button class="btn sm" onclick={() => start({ entry: e })}><Icon name="camera" size={16} />Start</button>
         </div>
       {/each}
@@ -246,12 +246,17 @@
             <b>{x.m.name}</b> <span class="cnt">{done}/{x.list.length}</span>
             <div class="dchips">
               {#each x.list as e (e.id)}
-                <span class="dchip {e.status}"><Icon name={e.status === 'done' ? 'check' : e.status === 'started' ? 'timer' : e.status === 'missed' ? 'x' : 'circle'} size={12} />{e.title}</span>
+                {#if e.status === 'todo' && e.member_id !== me.id && L.dutyDay(e) === c.today}
+                  <button class="dchip todo" onclick={() => takeover(e)} title="Übernehmen"><Icon name="repeat" size={12} />{e.title}</button>
+                {:else}
+                  <span class="dchip {e.status}"><Icon name={e.status === 'done' ? 'check' : e.status === 'started' ? 'timer' : e.status === 'missed' ? 'x' : 'circle'} size={12} />{e.title}{e.fuer ? ` (für ${mName(e.fuer)})` : ''}</span>
+                {/if}
               {/each}
             </div>
           </div>
         </div>
       {/each}
+      <p class="hint">Offenen Dienst von jemand anderem gemacht oder vor? Antippen zum Übernehmen: du bekommst die Punkte und +1 Bonus.</p>
     </details>
   {/if}
 

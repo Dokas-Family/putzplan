@@ -67,13 +67,16 @@ const clients = new Set();
 let collector = null;
 /** Während einer Anfrage sammeln wir alle Änderungen, damit die Antwort sie gleich mitliefert. */
 export const collect = fn => { collector = []; try { const result = fn(); return { result, changes: collector }; } finally { collector = null; } };
-function send(change, adminOnly) {
+function send(change, adminOnly, to = null) {
   collector?.push(change);
   const line = `data: ${JSON.stringify(change)}\n\n`;
-  for (const c of clients) if (!adminOnly || c.admin) c.res.write(line);
+  for (const c of clients) if (to ? c.member === to || c.admin : !adminOnly || c.admin) c.res.write(line);
 }
 /** Geänderte Zeile an alle offenen Geräte schicken. */
 export const emit = (table, r, { adminOnly = false } = {}) => send({ t: table, row: out(table, r) }, adminOnly);
+/** Nur an eine Person (alle ihre Geräte) und die Admins, z. B. Chat-Nachrichten und Anträge. */
+export const emitTo = (memberId, table, r) => send({ t: table, row: out(table, r) }, false, memberId);
+export const emitRaw = (memberId, change) => send(change, false, memberId);
 export const emitDel = (table, id) => send({ t: table, del: id }, false);
 export const emitSettings = s => send({ t: 'settings', row: s }, false);
 export const emitSay = r => send({ t: 'say', row: r }, false);

@@ -14,6 +14,7 @@
   import Late from '../sheets/Late.svelte';
   import Person from '../sheets/Person.svelte';
   import Action from '../sheets/Action.svelte';
+  import Antraege from '../sheets/Antraege.svelte';
 
   const c = $derived(G.calc), d = $derived(c.d), plan = $derived(c.plan);
   // Dienstplan: was heute noch offen ist, und was gestern liegen geblieben ist
@@ -36,6 +37,7 @@
   const inbox = $derived([
     G.backupLate && { icon: 'database-backup', c: 'bad', title: 'Sicherung überfällig', sub: `Zuletzt gelaufen: ${new Date(S.backup).toLocaleString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}`, go: () => { S.tab = 'verwaltung'; scrollTo(0, 0); } },
     ...G.pinHelp.map(m => ({ icon: 'key-round', c: 'info', title: `PIN vergessen: ${m.name}`, sub: 'Antippen zum Zurücksetzen', go: () => resetPin(m) })),
+    G.openAntraege.length && { icon: 'send', c: 'brand', title: 'Anträge über Claude', sub: `${G.openAntraege.length} offen · ${[...new Set(G.openAntraege.map(a => mName(a.member_id)))].join(', ')}`, go: () => open(Antraege) },
     G.queue.length && { icon: 'eye', c: 'brand', title: 'Fotos prüfen', sub: `${G.queue.length} neue Vorher/Nachher-Paare`, go: () => open(Review) },
     G.proposals.length && { icon: 'lightbulb', c: 'warn', title: 'Vorschläge', sub: `${G.proposals.length} neue Aufgaben-Ideen`, go: () => open(Proposals) },
     G.late.length && { icon: 'hourglass', c: 'bad', title: 'Liegengeblieben', sub: `${G.late.length} ${G.late.length === 1 ? 'Aufgabe wartet' : 'Aufgaben warten'} schon länger`, go: () => open(Late) },

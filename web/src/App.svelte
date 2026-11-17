@@ -15,21 +15,23 @@
   import Me from './views/Me.svelte';
   import Overview from './views/Overview.svelte';
   import Admin from './views/Admin.svelte';
+  import Chat from './views/Chat.svelte';
 
   const NAV = [
     { id: 'uebersicht', icon: 'layout-dashboard', label: 'Übersicht', admin: true },
     { id: 'heute', icon: 'list-checks', label: 'Heute' },
     { id: 'fotos', icon: 'images', label: 'Fotos' },
+    { id: 'claude', icon: 'sparkles', label: 'Claude' },
     { id: 'rang', icon: 'trophy', label: 'Rangliste' },
     { id: 'ich', icon: 'user', label: 'Ich' },
     { id: 'verwaltung', icon: 'settings', label: 'Verwaltung', admin: true, desk: true },
   ];
-  const VIEWS = { uebersicht: Overview, heute: Today, fotos: Photos, rang: Rank, ich: Me, verwaltung: Admin };
+  const VIEWS = { uebersicht: Overview, heute: Today, fotos: Photos, claude: Chat, rang: Rank, ich: Me, verwaltung: Admin };
   const items = $derived(NAV.filter(n => !n.admin || G.admin));
   const View = $derived(VIEWS[items.some(n => n.id === S.tab) ? S.tab : 'heute']);
-  const badge = $derived(G.admin ? G.queue.length + G.proposals.length + G.pinHelp.length : 0);
+  const badge = $derived(G.admin ? G.queue.length + G.proposals.length + G.pinHelp.length + G.openAntraege.length : 0);
   const fresh = $derived(G.freshMine); // neue Kommentare bei meinen Beiträgen
-  const dot = id => (id === 'uebersicht' ? badge : id === 'fotos' ? fresh : 0);
+  const dot = id => (id === 'uebersicht' ? badge : id === 'fotos' ? fresh : id === 'claude' && G.chatNew && S.tab !== 'claude' ? 1 : 0);
   // Ansicht merken: Reiter und Scrollstelle überstehen Neuladen und Reiterwechsel.
   // Gemerkt wird der oberste sichtbare Beitrag (data-anchor), weil Pixel bei nachladenden Bildern ungenau sind.
   const VIEW = 'pp_view', FRESH = 30 * 60e3;
@@ -47,6 +49,7 @@
     const v = readView(), p = v.pos?.[tab];
     await tick();
     await new Promise(r => requestAnimationFrame(r));
+    if (tab === 'claude') return; // der Chat scrollt selbst nach unten
     if (!p || Date.now() - (v.at || 0) > FRESH) return scrollTo(0, 0);
     const align = () => {
       const el = p.id && document.querySelector(`[data-anchor="${CSS.escape(p.id)}"]`);
