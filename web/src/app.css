@@ -249,8 +249,10 @@ button.chip{border:0;color:inherit}
 .zoom video{width:100%;border-radius:12px;display:block;background:#000}
 .zoom{display:grid;gap:8px}
 .zoom img{width:100%;border-radius:12px;display:block}
-.zimg{position:relative;display:block}
-.zimg .hi{position:absolute;inset:0;height:100%;object-fit:cover;opacity:0;transition:opacity .2s}
+.zoom .ph{display:block}
+.zimg{position:relative;display:block;width:100%}
+.zimg .lo{width:100%;height:auto}
+.zimg .hi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .2s}
 .zimg .hi.ready{opacity:1}@media(min-width:700px){.zoom.two{grid-template-columns:1fr 1fr}.sheet.big{max-width:900px}}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#1e1b33;color:#fff;padding:11px 16px;border-radius:14px;font-weight:700;z-index:50;max-width:90vw;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.3)}
 .rain{position:fixed;inset:0;pointer-events:none;z-index:60;overflow:hidden}

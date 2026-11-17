@@ -23,10 +23,10 @@
       {#if entry[key + '_video']}
         <video src="/photos/{entry[key + '_video']}" poster="/photos/{entry[key + '_photo']}.jpg" controls playsinline loop muted autoplay preload="metadata"></video>
       {:else}
-        <span class="zimg">
+        <div class="zimg">
           <img class="lo" src="/photos/{entry[key + '_photo']}.t.jpg" alt="" aria-hidden="true" />
           <img class="hi" use:fade src="/photos/{entry[key + '_photo']}.jpg" alt={label} decoding="async" />
-        </span>
+        </div>
       {/if}
       <span>{label}{entry[key + '_video'] ? ' · Video' : ''}</span>
     </div>
