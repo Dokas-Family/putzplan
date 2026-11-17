@@ -12,21 +12,31 @@
   const lead = $derived(per[ranked[0]?.id]?.[f] > 0 ? ranked[0].id : null);
 
   // Fair-O-Meter. Mit Dienstplan: wie viele der eigenen Dienste diese Woche erledigt sind.
-  // Ohne: Anteil an den Wochenpunkten gemessen an dem, was jeder laut Einstellung schaffen kann.
+  // Ohne: Wochenpunkte gemessen an den eigenen Tageszielen der Woche (Pensum und Mindestziel stecken schon drin).
+  // Freie Tage und Abwesenheit zählen nicht mit, heute erst, wenn das Ziel geschafft ist.
   const plan = $derived(G.plan);
   const total = $derived(ranked.reduce((s, m) => s + Math.max(0, per[m.id].week), 0));
-  const share = m => +m.w_weekday * 5 + +m.w_weekend * 2;
-  const wsum = $derived(ranked.reduce((s, m) => s + share(m), 0) || 1);
   const grade = q => (q >= 1.1 ? ['ok', 'flame', 'Mehr als genug'] : q >= 0.8 ? ['brand', 'thumbs-up', 'Passt'] : q >= 0.4 ? ['warn', 'hourglass', 'Da geht noch was'] : ['bad', 'circle-alert', 'Faultier-Alarm']);
+  function goalWeek(m) {
+    const c = G.calc;
+    let soll = 0;
+    for (let i = 0; i < L.isoDay(c.d); i++) {
+      const d = L.noon(c.d, i), s = L.dayState(c.st, c.ix, m, d, c.d);
+      if (s === 'frei' || (i === 0 && s !== 'ok')) continue;
+      soll += L.goalOf(c.st, m, d);
+    }
+    return soll;
+  }
   function fair(m) {
     if (plan) {
       const w = per[m.id].dutyWeek;
-      if (!w?.total) return ['info', 'tree-palm', 'Keine Dienste'];
+      if (!w?.total) return ['info', 'tree-palm', per[m.id].frei ? 'Hat frei' : 'Keine Dienste'];
       const q = w.done / w.total;
       return [...grade(q >= 1 ? 1.1 : q >= 0.85 ? 0.8 : q >= 0.5 ? 0.4 : 0).slice(0, 2), `${w.done} von ${w.total} Diensten`];
     }
-    const soll = total * share(m) / wsum;
-    return grade(soll ? per[m.id].week / soll : 0);
+    const soll = goalWeek(m), ist = per[m.id].week;
+    if (!soll) return ist > 0 ? grade(1.1) : ['info', 'tree-palm', per[m.id].frei ? 'Hat frei' : 'Noch offen'];
+    return grade(ist / soll);
   }
   const KIND = { bonus: ['ok', 'star'], warn: ['bad', 'triangle-alert'], frei: ['info', 'tree-palm'] };
   const rewards = $derived(S.entries.filter(e => KIND[e.task_id] && e.status === 'done').sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 15));
@@ -63,7 +73,7 @@
 
   {#if total > 0 || plan}
     <section class="card list">
-      <h2><Icon name="scale" />Fair-O-Meter <small>{plan ? 'diese Woche: eigene Dienste erledigt' : 'diese Woche, gemessen am eigenen Pensum'}</small></h2>
+      <h2><Icon name="scale" />Fair-O-Meter <small>{plan ? 'diese Woche: eigene Dienste erledigt' : 'diese Woche, gemessen am eigenen Tagesziel, freie Tage zählen nicht'}</small></h2>
       {#each ranked as m (m.id)}
         {@const [c, icon, text] = fair(m)}
         <div class="row"><span class="grow">{m.emoji} <b>{m.name}</b></span><span class="chip c-{c}"><Icon name={icon} size={14} />{text}</span></div>
