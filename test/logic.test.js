@@ -83,6 +83,36 @@ test('Regel „Punkte erst nach dem Prüfen“', () => {
   assert.ok(L.counts({ ...e, task_id: 'bonus' }, { review_first: true })); // Belohnungen brauchen keine Prüfung
 });
 
+test('Dienstplan: Tag geschafft heißt alle Dienste erledigt, die Serie beginnt mit dem Plan', () => {
+  const today = day(2026, 11, 19); // Donnerstag
+  const mia = { id: 'mia', role: 'mitglied', active: true, w_weekday: 1, w_weekend: 1 };
+  const duty = (id, back, status, by = 'plan') => ({ id, task_id: 't' + id, title: 'Küche', member_id: 'mia', created_by: by, helpers: [], status, points: 3, created_at: at(L.noon(today, back)), after_at: status === 'done' ? at(L.noon(today, back)) : null, period: L.dKey(L.noon(today, back)), slot: '' });
+  const entries = [
+    duty('a', 0, 'done'), duty('b', 0, 'todo'), // heute: 1 von 2
+    duty('c', 1, 'done'), duty('d', 1, 'done'), // gestern: alles
+    duty('e', 2, 'done'), duty('f', 2, 'missed'), // vorgestern: teilweise
+    duty('g', 5, 'done'), // vor dem Plan
+    { id: 'x', task_id: 'y', title: 'Decken richten', member_id: 'mia', created_by: 'mia', helpers: [], status: 'done', points: 1, created_at: at(L.noon(today, 0)), after_at: at(L.noon(today, 0)), period: '', slot: '' },
+    { id: 'b1', task_id: 'bonus', title: 'Lieb', member_id: 'mia', created_by: 'felix', helpers: [], status: 'done', points: 5, created_at: at(L.noon(today, 0)), after_at: at(L.noon(today, 0)), period: '', slot: 'b1' },
+  ];
+  const st = { members: [mia], tasks: [], settings: { ...L.DEFAULT_SETTINGS, dienste: true, plan_start: '2026-11-16' }, entries };
+  const ix = L.buildIndex(st);
+  assert.ok(L.planOn(st.settings, today) && !L.planOn(st.settings, day(2026, 11, 15)));
+  assert.ok(!L.isDuty(entries[7]), 'Selbst ausgesucht ist kein Dienst');
+  assert.ok(!L.isDuty(entries[8]), 'Belohnungen sind keine Dienste');
+  assert.ok(L.isDuty({ member_id: 'mia', created_by: 'felix', task_id: 'adhoc' }), 'Von einem Admin zugewiesen ist ein Dienst');
+  assert.equal(L.dutiesOn(ix, 'mia', today).length, 2);
+  assert.equal(L.openDuties(ix, 'mia').length, 1);
+  assert.equal(L.dayState(st, ix, mia, today, today), 'now');
+  assert.equal(L.dayState(st, ix, mia, L.noon(today, 1), today), 'ok');
+  assert.equal(L.dayState(st, ix, mia, L.noon(today, 2), today), 'teil');
+  assert.equal(L.dayState(st, ix, mia, L.noon(today, 3), today), 'frei'); // Montag: keine Dienste
+  assert.equal(L.streak(ix, mia, st, today), 1); // gestern ja, vorgestern nicht ganz
+  assert.deepEqual(L.dutyWeek(ix, 'mia', today), { total: 6, done: 4 });
+  assert.equal(L.dayTotals(st, today).pts.mia, 3 + 1 + 5); // Dienst, Extra und Belohnung zählen heute mit
+  assert.equal(L.taskKey('Spülmaschine einräumen, Tab rein & anmachen'), L.taskKey('Spülmaschine Einräumen'));
+});
+
 test('Wochensieger: wer in der Vorwoche vorne lag', () => {
   const today = day(2026, 11, 13);
   const members = [{ id: 'a', active: true, name: 'A' }, { id: 'b', active: true, name: 'B' }];

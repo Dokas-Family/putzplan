@@ -37,14 +37,20 @@ db.exec(`
 // Spalten, die später dazugekommen sind
 const hasCol = (table, col) => db.prepare(`pragma table_info(${table})`).all().some(r => r.name === col);
 if (!hasCol('members', 'pin_help')) db.exec('alter table members add column pin_help text'); // Zeitpunkt von „PIN vergessen“
+/** Dienst (wird reihum verteilt) oder Extra (freiwillig). Beim Einführen: alles ab 3 Punkten ist ein Dienst. */
+export const PFLICHT_AB = 3;
+const markDuties = () => db.exec(`update tasks set pflicht = 1 where per_person = 0 and coalesce(points, max(1, round(minutes / 5.0))) >= ${PFLICHT_AB}`);
+if (!hasCol('tasks', 'pflicht')) { db.exec('alter table tasks add column pflicht integer default 0'); markDuties(); }
+if (!hasCol('entries', 'before_video')) db.exec('alter table entries add column before_video text; alter table entries add column after_video text;');
+export { markDuties };
 
 const COLS = {
   members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help'],
-  tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by'],
-  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note'],
+  tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
+  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at'],
 };
-const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active'] };
+const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active', 'pflicht'] };
 const val = v => (v === undefined ? null : v === true ? 1 : v === false ? 0 : Array.isArray(v) ? JSON.stringify(v) : v);
 
 export const q = {
@@ -78,7 +84,8 @@ export function out(table, r) {
 // ---------- Einstellungen und andere Einzelwerte ----------
 export const getMeta = (key, fallback = null) => { const r = q.get('select value from meta where key = ?', key); return r ? JSON.parse(r.value) : fallback; };
 export const setMeta = (key, value) => q.run('insert into meta (key, value) values (?, ?) on conflict (key) do update set value = excluded.value', key, JSON.stringify(value));
-export const settings = () => ({ ...DEFAULT_SETTINGS, ...getMeta('settings', {}) });
+/** Regeln, dazu der erste Tag des Dienstplans (steht getrennt, damit Speichern der Regeln ihn nicht verliert). */
+export const settings = () => ({ ...DEFAULT_SETTINGS, ...getMeta('settings', {}), plan_start: getMeta('plan_start') });
 /** Wann scripts/backup.sh zuletzt erfolgreich gelaufen ist (oder null, wenn noch nie). */
 export const lastBackup = () => { try { return readFileSync(join(DATA, '.letzte-sicherung'), 'utf8').trim() || null; } catch { return null; } };
 export const newCode = () => randomBytes(12).toString('base64url');
@@ -125,3 +132,24 @@ export function delPhoto(name) {
   if (!name || !SAFE.test(name)) return;
   for (const f of [photoFile(name), photoFile(name, true)]) if (existsSync(f)) rmSync(f, { force: true });
 }
+
+// ---------- Videos (freiwillig zum Foto dazu) ----------
+export const VIDEO = /^([a-z0-9-]{8,80})\.(mp4|webm)$/;
+export const VIDEO_MAX = 30_000_000;
+export const videoFile = name => (VIDEO.test(name || '') ? join(PHOTOS, name) : null);
+/** Prüft die ersten Bytes: MP4 hat „ftyp“ an Stelle 4, WebM beginnt mit 1A 45 DF A3. Liefert die Endung oder null. */
+export function videoKind(buf) {
+  if (buf.length > 12 && buf.toString('latin1', 4, 8) === 'ftyp') return 'mp4';
+  if (buf.length > 4 && buf.readUInt32BE(0) === 0x1a45dfa3) return 'webm';
+  return null;
+}
+export function saveVideo(base, buf) {
+  const ext = videoKind(buf);
+  if (!ext) throw Object.assign(new Error('Das ist kein Video, das die App kennt'), { status: 400 });
+  const name = `${base}.${ext}`, file = join(PHOTOS, name);
+  if (!VIDEO.test(name)) throw Object.assign(new Error('Ungültiger Videoname'), { status: 400 });
+  writeFileSync(file + '.tmp', buf);
+  renameSync(file + '.tmp', file);
+  return name;
+}
+export function delVideo(name) { const f = videoFile(name); if (f && existsSync(f)) rmSync(f, { force: true }); }

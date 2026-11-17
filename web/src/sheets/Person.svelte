@@ -9,9 +9,10 @@
   import Action from './Action.svelte';
   import MemberEdit from './MemberEdit.svelte';
   import Points from './Points.svelte';
+  import DutyPick from './DutyPick.svelte';
   let { id, close } = $props();
   const m = $derived(mem(id)), p = $derived(G.calc.per[id]);
-  const today = $derived(S.entries.filter(e => L.involved(e, id) && !L.ADMIN_KINDS.has(e.task_id) && ((e.status === 'done' && L.dKey(new Date(e.after_at)) === G.calc.today) || e.status === 'started' || e.status === 'todo')));
+  const today = $derived(S.entries.filter(e => L.involved(e, id) && !L.ADMIN_KINDS.has(e.task_id) && ((e.status === 'done' && L.dKey(new Date(e.after_at)) === G.calc.today) || e.status === 'started' || e.status === 'todo' || (e.status === 'missed' && L.dutyDay(e) >= L.dKey(L.noon(G.calc.d, 1))))));
   const time = iso => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   const act = kind => open(Action, { kind, member: id });
 </script>
@@ -19,17 +20,19 @@
 {#if m && p}
   <Head title="{m.emoji} {m.name}" {close}><span class="chip c-brand">{L.ROLES[m.role]}</span></Head>
   <div class="stats" style="margin:0 0 14px">
-    <div><b>{p.today}{p.goal ? '/' + p.goal : ''}</b><small>heute</small></div>
-    <div><b>{p.week}</b><small>Woche</small></div>
+    {#if G.plan}<div><b>{p.dutiesDone}/{p.duties.length}</b><small>Dienste</small></div>{:else}<div><b>{p.goalPts}{p.goal ? '/' + p.goal : ''}</b><small>Tagesziel</small></div>{/if}
+    <div><b>{p.today}</b><small>P heute</small></div>
+    <div><b>{p.week}</b><small>P Woche</small></div>
     <div><b>{p.streak}</b><small>Tage Serie</small></div>
-    <div><b>{p.bank}</b><small>im Konto</small></div>
   </div>
+  {#if G.plan && p.dutyWeek?.total}<p class="hint" style="margin:-6px 0 10px">Diese Woche {p.dutyWeek.done} von {p.dutyWeek.total} Diensten erledigt.</p>{/if}
   <div class="list">
     <h2>Heute</h2>
     {#each today as e (e.id)}
       <div class="row">
-        <span class="tile c-{e.status === 'done' ? 'ok' : e.status === 'started' ? 'brand' : 'warn'}"><Icon name={e.status === 'done' ? 'check' : e.status === 'started' ? 'timer' : 'clipboard-list'} /></span>
-        <div class="grow"><b>{e.title}</b><small>{e.status === 'done' ? `fertig um ${time(e.after_at)}` : e.status === 'started' ? `läuft seit ${time(e.before_at)}` : 'zugewiesen, noch nicht angefangen'}</small></div>
+        <span class="tile c-{e.status === 'done' ? 'ok' : e.status === 'started' ? 'brand' : e.status === 'missed' ? 'bad' : 'warn'}"><Icon name={e.status === 'done' ? 'check' : e.status === 'started' ? 'timer' : e.status === 'missed' ? 'x' : 'clipboard-list'} /></span>
+        <div class="grow"><b>{e.title}</b><small>{e.status === 'done' ? `fertig um ${time(e.after_at)}` : e.status === 'started' ? `läuft seit ${time(e.before_at)}` : e.status === 'missed' ? 'gestern nicht gemacht' : L.isDuty(e) ? (e.created_by === 'plan' ? 'Dienst, noch nicht angefangen' : 'zugewiesen, noch nicht angefangen') : 'selbst eingetragen'}</small></div>
+        {#if e.status === 'todo' && L.isDuty(e)}<button class="icb" onclick={() => open(DutyPick, { entry: e })} aria-label="Jemand anderem geben"><Icon name="shuffle" size={16} /></button>{/if}
         {#if e.status === 'done'}<span class="pts">+{L.shares(e)[id] ?? e.points}</span>{/if}
       </div>
     {:else}

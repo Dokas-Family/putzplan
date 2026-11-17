@@ -6,13 +6,25 @@
   import { open } from '../lib/ui.svelte.js';
   import { roomOf } from '../lib/rooms.js';
   import { resetPin } from '../lib/act.js';
+  import { post, mName } from '../lib/store.svelte.js';
+  import { toast, tryDo } from '../lib/ui.svelte.js';
   import Review from '../sheets/Review.svelte';
+  import DutyPick from '../sheets/DutyPick.svelte';
   import Proposals from '../sheets/Proposals.svelte';
   import Late from '../sheets/Late.svelte';
   import Person from '../sheets/Person.svelte';
   import Action from '../sheets/Action.svelte';
 
-  const c = $derived(G.calc), d = $derived(c.d);
+  const c = $derived(G.calc), d = $derived(c.d), plan = $derived(c.plan);
+  // Dienstplan: was heute noch offen ist, und was gestern liegen geblieben ist
+  const openDuties = $derived(plan ? G.active.flatMap(m => c.per[m.id].duties.filter(e => e.status === 'todo')) : []);
+  const yesterday = $derived(L.dKey(L.noon(d, 1)));
+  const missed = $derived(S.entries.filter(e => e.status === 'missed' && L.dutyDay(e) === yesterday));
+  async function redo() {
+    if (!confirm('Alle heute noch nicht angefangenen Dienste neu verteilen? Angefangenes und Erledigtes bleibt.')) return;
+    let r;
+    if (await tryDo(async () => { r = await post('/plan/redo'); })) toast(`${r.count} Dienste neu verteilt`);
+  }
   const dateLabel = $derived(d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' }));
   const shared = $derived(G.shared.map(t => ({ t, e: L.entryFor(c.ix, t, d, null) })));
   const doneCount = $derived(shared.filter(x => x.e?.status === 'done').length);
@@ -24,11 +36,18 @@
     G.queue.length && { icon: 'eye', c: 'brand', title: 'Fotos prüfen', sub: `${G.queue.length} neue Vorher/Nachher-Paare`, go: () => open(Review) },
     G.proposals.length && { icon: 'lightbulb', c: 'warn', title: 'Vorschläge', sub: `${G.proposals.length} neue Aufgaben-Ideen`, go: () => open(Proposals) },
     G.late.length && { icon: 'hourglass', c: 'bad', title: 'Liegengeblieben', sub: `${G.late.length} ${G.late.length === 1 ? 'Aufgabe wartet' : 'Aufgaben warten'} schon länger`, go: () => open(Late) },
+    missed.length && { icon: 'calendar-x', c: 'bad', title: `Gestern ${missed.length} ${missed.length === 1 ? 'Dienst' : 'Dienste'} nicht gemacht`, sub: [...new Set(missed.map(e => mName(e.member_id)))].join(', ') + ' · antippen für Details', go: () => open(Person, { id: missed[0].member_id }) },
   ].filter(Boolean));
 
   function status(m) {
     const p = c.per[m.id];
     if (L.isAway(m, d)) return ['info', 'Abwesend'];
+    if (plan) {
+      if (!p.duties.length) return ['info', 'Keine Dienste'];
+      if (p.dutiesDone === p.duties.length) return ['ok', 'Fertig'];
+      if (runningEntries.some(e => L.involved(e, m.id))) return ['brand', 'Putzt gerade'];
+      return p.dutiesDone ? ['warn', 'Dabei'] : ['bad', 'Noch nichts'];
+    }
     if (!p.goal) return ['info', 'Heute frei'];
     if (p.today >= p.goal) return ['ok', 'Fertig'];
     if (runningEntries.some(e => L.involved(e, m.id))) return ['brand', 'Putzt gerade'];
@@ -36,7 +55,8 @@
   }
   // Wochenraster: Montag bis Sonntag der laufenden Woche
   const week = $derived(Array.from({ length: 7 }, (_, i) => L.noon(d, L.isoDay(d) - 1 - i)));
-  const since = $derived(S.entries.length ? L.dKey(new Date(S.entries.reduce((a, e) => (e.created_at < a ? e.created_at : a), S.entries[0].created_at))) : c.today);
+  // Tage vor dem ersten Eintrag (und mit Dienstplan: vor seinem Start) bleiben leer
+  const since = $derived(plan && S.settings.plan_start ? S.settings.plan_start : S.entries.length ? L.dKey(new Date(S.entries.reduce((a, e) => (e.created_at < a ? e.created_at : a), S.entries[0].created_at))) : c.today);
   const rooms = $derived([...new Set(shared.map(x => x.t.room))].map(name => {
     const xs = shared.filter(x => x.t.room === name);
     return { name, total: xs.length, done: xs.filter(x => x.e?.status === 'done').length, late: xs.filter(x => !x.e && L.overdueInPeriod(x.t, d)).length, ...roomOf(name, S.settings) };
@@ -84,11 +104,12 @@
         {#each G.active as m (m.id)}
           {@const p = c.per[m.id]}
           {@const [color, text] = status(m)}
+          {@const [v, g] = plan ? [p.dutiesDone, p.duties.length] : [p.goalPts, p.goal]}
           <button class="pcell" onclick={() => open(Person, { id: m.id })}>
             <span class="ava sm">{m.emoji}</span>
             <span class="grow">
-              <b>{m.name}</b> <span class="n">{p.today}{p.goal ? '/' + p.goal : ''}</span>
-              <span class="bar" class:ok={p.goal > 0 && p.today >= p.goal}><i style="width:{p.goal ? Math.min(100, 100 * p.today / p.goal) : 0}%"></i></span>
+              <b>{m.name}</b> <span class="n">{v}{g ? '/' + g : ''}</span>
+              <span class="bar" class:ok={g > 0 && v >= g}><i style="width:{g ? Math.min(100, 100 * v / g) : 0}%"></i></span>
               <small class="c-{color}">{text}</small>
             </span>
           </button>
@@ -109,7 +130,7 @@
               {#each week as x (x.getTime())}
                 {@const s = L.dayState(c.st, c.ix, m, x, d, since)}
                 <td>
-                  {#if s === 'now'}<i class="dot now" style="--p:{Math.round(100 * c.per[m.id].today / (c.per[m.id].goal || 1))}%"></i>
+                  {#if s === 'now'}<i class="dot now" style="--p:{plan ? Math.round(100 * c.per[m.id].dutiesDone / (c.per[m.id].duties.length || 1)) : Math.round(100 * c.per[m.id].goalPts / (c.per[m.id].goal || 1))}%"></i>
                   {:else}<i class="dot {s}">{#if s === 'ok'}<Icon name="check" size={12} bold />{:else if s === 'miss'}<Icon name="x" size={12} bold />{:else if s === 'frei'}<Icon name="tree-palm" size={12} bold />{/if}</i>{/if}
                 </td>
               {/each}
@@ -117,8 +138,25 @@
           {/each}
         </tbody>
       </table>
-      <div class="legend"><span><i class="dot ok"></i>Ziel geschafft</span><span><i class="dot teil"></i>teilweise</span><span><i class="dot miss"></i>nichts</span><span><i class="dot frei"></i>frei</span></div>
+      <div class="legend"><span><i class="dot ok"></i>{plan ? 'alle Dienste' : 'Ziel geschafft'}</span><span><i class="dot teil"></i>teilweise</span><span><i class="dot miss"></i>nichts</span><span><i class="dot frei"></i>{plan ? 'keine Dienste' : 'frei'}</span></div>
     </section>
+
+    {#if plan}
+      <details class="card list">
+        <summary><Icon name="calendar-check" />Dienstplan heute <span class="cnt grow">{openDuties.length} noch nicht angefangen</span><Icon name="chevron-down" /></summary>
+        <button class="btn sec sm wide" style="margin-bottom:6px" onclick={redo}><Icon name="shuffle" size={16} />Neu verteilen</button>
+        {#each openDuties as e (e.id)}
+          <div class="row">
+            <span class="ava sm">{G.active.find(m => m.id === e.member_id)?.emoji || '🙂'}</span>
+            <div class="grow"><b>{e.title}</b><small>{mName(e.member_id)} · noch nicht angefangen</small></div>
+            <button class="icb" onclick={() => open(DutyPick, { entry: e })} aria-label="Jemand anderem geben"><Icon name="shuffle" size={16} /></button>
+          </div>
+        {:else}
+          <p class="sub">Alle Dienste von heute sind angefangen oder erledigt.</p>
+        {/each}
+        <p class="hint">Jeden Morgen um 4 Uhr wird neu verteilt. Wer frei bekommt oder abwesend ist, gibt seine Dienste automatisch ab.</p>
+      </details>
+    {/if}
 
     <section class="card list">
       <h2>Räume heute</h2>

@@ -22,8 +22,10 @@ export const DAYS_SHORT = ['', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende' };
 export const ROLES = { admin: 'Admin', mitglied: 'Mitglied', kind: 'Kind' };
 export const REACTS = ['❤️', '👏', '😍', '🔥', '😂', '🤢', '🙈'];
-export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, rooms: {} };
+export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, rooms: {} };
 export const DEFAULT_RAIN = '🎉✨⭐🧽💪🌈';
+/** Claude als System-Konto: schreibt Kommentare und reagiert, ist aber keine Person im Haushalt. */
+export const SYSTEM = { id: 'claude', name: 'Claude', emoji: '✨', role: 'system', active: false, system: true };
 
 // Einträge ohne echte Aufgabe dahinter
 export const ADMIN_KINDS = new Set(['bonus', 'warn', 'frei', 'redeem']);
@@ -98,10 +100,29 @@ export function shares(e) {
 /** Zählt der Eintrag für Punkte? Mit der Regel "erst nach dem Prüfen" nur geprüfte Aufgaben. */
 export const counts = (e, settings) => e.status === 'done' && !!e.after_at && (!settings.review_first || ADMIN_KINDS.has(e.task_id) || e.review === 'ok');
 
-/** Einmal pro Zustand bauen, danach sind Tagespunkte und "gibt es schon einen Eintrag?" billig. */
+// ---------- Dienste ----------
+/**
+ * Ein Dienst ist, was jemand bekommen hat: vom Dienstplan, von einem Admin zugewiesen oder „Wer kocht, räumt auf“.
+ * Was man sich selbst aussucht, ist kein Dienst.
+ */
+export const isDuty = e => !!e && !ADMIN_KINDS.has(e.task_id) && (e.created_by === 'plan' || e.note === 'koch' || (!!e.created_by && e.created_by !== e.member_id));
+export const isOpen = e => e.status === 'todo' || e.status === 'started';
+/** Der Tag, für den ein Dienst gedacht war. */
+export const dutyDay = e => dKey(new Date(e.created_at));
+/** Gilt an diesem Tag schon der Dienstplan? Davor zählte das Tagesziel in Punkten. */
+export const planOn = (settings, d) => !!settings?.dienste && !!settings.plan_start && dKey(d) >= settings.plan_start;
+/** Ähnliche Aufgaben gelten als dieselbe („Spülmaschine einräumen“ gibt es mehrfach). */
+export const taskKey = title => String(title || '').toLowerCase().replace(/[^a-zäöüß ]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 2).join(' ');
+
+/** Einmal pro Zustand bauen, danach sind Tagespunkte, Dienste und "gibt es schon einen Eintrag?" billig. */
 export function buildIndex(st) {
-  const day = new Map(), byKey = new Map(), redeemed = {};
+  const day = new Map(), byKey = new Map(), redeemed = {}, duty = new Map(), open = new Map();
+  const push = (map, k, e) => (map.get(k) || map.set(k, []).get(k)).push(e);
   for (const e of st.entries) {
+    if (e.status !== 'rejected' && isDuty(e)) {
+      push(duty, `${e.member_id}|${dutyDay(e)}`, e);
+      if (isOpen(e)) push(open, e.member_id, e);
+    }
     if (e.status !== 'rejected' && e.task_id !== 'adhoc') byKey.set(entryKey(e.task_id, e.period, e.slot), e);
     if (!counts(e, st.settings)) continue;
     if (e.task_id === 'redeem') redeemed[e.member_id] = (redeemed[e.member_id] || 0) + (+e.points || 0);
@@ -109,10 +130,25 @@ export function buildIndex(st) {
     const k = dKey(new Date(e.after_at));
     for (const [id, p] of Object.entries(shares(e))) day.set(`${id}|${k}`, (day.get(`${id}|${k}`) || 0) + p);
   }
-  return { day, byKey, redeemed };
+  return { day, byKey, redeemed, duty, open };
 }
 export const entryFor = (ix, t, d, memberId) => ix.byKey.get(entryKey(t.id, periodOf(t, d), slotOf(t, memberId)));
 export const dayPoints = (ix, id, d) => ix.day.get(`${id}|${dKey(d)}`) || 0;
+/** Dienste einer Person für einen Tag. Für heute kommen ältere dazu, die noch offen sind (z. B. ein Wochendienst von gestern). */
+export function dutiesOn(ix, id, d, today = d) {
+  const k = dKey(d), list = ix.duty.get(`${id}|${k}`) || [];
+  if (k !== dKey(today)) return list;
+  return [...(ix.open.get(id) || []).filter(e => dutyDay(e) < k), ...list];
+}
+export const openDuties = (ix, id) => ix.open.get(id) || [];
+/** Dienste der laufenden Woche bis heute: wie viele es waren und wie viele erledigt sind. */
+export function dutyWeek(ix, id, today = new Date()) {
+  let total = 0, done = 0;
+  for (let i = 0; i < isoDay(today); i++) {
+    for (const e of ix.duty.get(`${id}|${dKey(noon(today, i))}`) || []) { total++; if (e.status === 'done') done++; }
+  }
+  return { total, done };
+}
 
 /** Punktekonto: was an den letzten 35 Tagen über dem Tagesziel lag, minus Eingelöstes. */
 export function bank(ix, m, st, today = new Date()) {
@@ -120,8 +156,22 @@ export function bank(ix, m, st, today = new Date()) {
   for (let i = 1; i <= 35; i++) { const d = noon(today, i); earned += Math.max(0, dayPoints(ix, m.id, d) - dayGoal(m, d, st.settings)); }
   return Math.max(0, earned - (ix.redeemed[m.id] || 0));
 }
-/** Serie: Tage am Stück mit geschafftem Tagesziel (Tage ohne Ziel zählen nicht mit und brechen nichts ab). */
+/**
+ * Serie: Tage am Stück, die geschafft sind. Mit Dienstplan heißt das: alle Dienste erledigt (Tage ohne Dienste
+ * zählen nicht mit und brechen nichts ab, die Serie beginnt frühestens mit dem Dienstplan). Ohne: Tagesziel erreicht.
+ */
 export function streak(ix, m, st, today = new Date()) {
+  if (planOn(st.settings, today)) {
+    let n = dayState(st, ix, m, noon(today), today) === 'ok' ? 1 : 0;
+    for (let i = 1; i <= 60; i++) {
+      const d = noon(today, i);
+      if (!planOn(st.settings, d)) break;
+      const s = dayState(st, ix, m, d, today);
+      if (s === 'frei') continue;
+      if (s === 'ok') n++; else break;
+    }
+    return n;
+  }
   let n = 0;
   const t = noon(today), g0 = dayGoal(m, t, st.settings);
   if (g0 > 0 && dayPoints(ix, m.id, t) >= g0) n++;
@@ -138,6 +188,8 @@ function sumBy(st, match) {
   }
   return { pts, cnt, warn, bonus };
 }
+/** Punkte eines Tages, einer Woche, eines Monats: Aufgaben, Belohnungen und Abmahnungen. Überall dieselbe Rechnung. */
+export const dayTotals = (st, d = new Date()) => { const k = dKey(d); return sumBy(st, x => dKey(x) === k); };
 export const weekPoints = (st, d = new Date()) => { const wk = weekKey(d); return sumBy(st, x => weekKey(x) === wk); };
 export const monthPoints = (st, d = new Date()) => { const mk = mKey(d); return sumBy(st, x => mKey(x) === mk); };
 
@@ -155,6 +207,13 @@ export const royalTitle = m => ({ k: 'König', q: 'Königin' })[m.titel] || 'Maj
 export function dayState(st, ix, m, d, today = new Date(), since = '') {
   const k = dKey(d), tk = dKey(today);
   if (k > tk || k < since) return 'future'; // "since": Tage, bevor es überhaupt Einträge gab, bleiben leer
+  if (planOn(st.settings, d)) {
+    const ds = dutiesOn(ix, m.id, d, today), done = ds.filter(e => e.status === 'done').length;
+    if (!ds.length) return 'frei';
+    if (done === ds.length) return 'ok';
+    if (k === tk) return 'now';
+    return done ? 'teil' : 'miss';
+  }
   const g = dayGoal(m, d, st.settings), p = dayPoints(ix, m.id, d);
   if (g <= 0 || st.entries.some(e => e.task_id === 'frei' && e.member_id === m.id && e.status === 'done' && e.period === k)) return 'frei';
   if (p >= g) return 'ok';

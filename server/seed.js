@@ -1,6 +1,6 @@
 // Startdaten für eine ganz neue Installation (ohne Umzug aus V1): eine Admin-Person und die Standard-Aufgaben.
 import { randomUUID } from 'node:crypto';
-import { q, insert, setMeta, inviteCode } from './db.js';
+import { q, insert, setMeta, inviteCode, markDuties } from './db.js';
 import { DEFAULT_SETTINGS } from '../shared/logic.js';
 
 // id, Titel, Raum, Häufigkeit, Tag, Minuten, Punkte, leicht, pro Person
@@ -33,6 +33,7 @@ export function seedIfEmpty() {
   if (q.get('select id from members limit 1')) return false;
   insert('members', { id: randomUUID(), name: 'Admin', emoji: '👑', role: 'admin', active: true, sort: 0 });
   for (const [id, title, room, freq, day, minutes, points, leicht, per_person] of TASKS) insert('tasks', { id, title, room, freq, day, minutes, points, leicht: !!leicht, per_person: !!per_person, active: true });
+  markDuties(); // ab 3 Punkten ist es ein Dienst, darunter ein Extra
   setMeta('settings', DEFAULT_SETTINGS);
   inviteCode();
   return true;

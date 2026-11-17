@@ -11,13 +11,22 @@
   const max = $derived(Math.max(1, ...ranked.map(m => per[m.id][f])));
   const lead = $derived(per[ranked[0]?.id]?.[f] > 0 ? ranked[0].id : null);
 
-  // Fair-O-Meter: Anteil an den Wochenpunkten gemessen an dem, was jeder laut Einstellung schaffen kann
+  // Fair-O-Meter. Mit Dienstplan: wie viele der eigenen Dienste diese Woche erledigt sind.
+  // Ohne: Anteil an den Wochenpunkten gemessen an dem, was jeder laut Einstellung schaffen kann.
+  const plan = $derived(G.plan);
   const total = $derived(ranked.reduce((s, m) => s + Math.max(0, per[m.id].week), 0));
   const share = m => +m.w_weekday * 5 + +m.w_weekend * 2;
   const wsum = $derived(ranked.reduce((s, m) => s + share(m), 0) || 1);
+  const grade = q => (q >= 1.1 ? ['ok', 'flame', 'Mehr als genug'] : q >= 0.8 ? ['brand', 'thumbs-up', 'Passt'] : q >= 0.4 ? ['warn', 'hourglass', 'Da geht noch was'] : ['bad', 'circle-alert', 'Faultier-Alarm']);
   function fair(m) {
-    const soll = total * share(m) / wsum, q = soll ? per[m.id].week / soll : 0;
-    return q >= 1.1 ? ['ok', 'flame', 'Mehr als genug'] : q >= 0.8 ? ['brand', 'thumbs-up', 'Passt'] : q >= 0.4 ? ['warn', 'hourglass', 'Da geht noch was'] : ['bad', 'circle-alert', 'Faultier-Alarm'];
+    if (plan) {
+      const w = per[m.id].dutyWeek;
+      if (!w?.total) return ['info', 'tree-palm', 'Keine Dienste'];
+      const q = w.done / w.total;
+      return [...grade(q >= 1 ? 1.1 : q >= 0.85 ? 0.8 : q >= 0.5 ? 0.4 : 0).slice(0, 2), `${w.done} von ${w.total} Diensten`];
+    }
+    const soll = total * share(m) / wsum;
+    return grade(soll ? per[m.id].week / soll : 0);
   }
   const KIND = { bonus: ['ok', 'star'], warn: ['bad', 'triangle-alert'], frei: ['info', 'tree-palm'] };
   const rewards = $derived(S.entries.filter(e => KIND[e.task_id] && e.status === 'done').sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 15));
@@ -30,7 +39,7 @@
   <div class="seg">
     {#each [['heute', 'Heute'], ['woche', 'Woche'], ['monat', 'Monat']] as [k, l] (k)}<button class:on={seg === k} onclick={() => (seg = k)}>{l}</button>{/each}
   </div>
-  {#if seg === 'woche'}<p class="sub" style="margin:0 2px 10px">Wer am Sonntagabend vorne liegt, regiert nächste Woche und darf sich einen freien Tag aussuchen.</p>{/if}
+  <p class="sub" style="margin:0 2px 10px">{seg === 'woche' ? 'Wer am Sonntagabend vorne liegt, regiert nächste Woche und darf sich einen freien Tag aussuchen.' : 'Punkte aus Aufgaben, dazu Belohnungen und Abmahnungen.'}</p>
   <section class="card list">
     {#each ranked as m, i (m.id)}
       {@const p = per[m.id]}
@@ -40,11 +49,11 @@
         <div class="grow">
           <b>{m.name}</b>
           {#if lead === m.id && seg === 'woche'}<span class="chip c-warn"><Icon name="crown" size={14} />führt</span>{/if}
-          <span class="bar" class:ok={seg === 'heute' && p.goal > 0 && p.today >= p.goal}><i style="width:{Math.max(0, 100 * p[f] / max)}%"></i></span>
+          <span class="bar" class:ok={seg === 'heute' && (plan ? p.duties.length > 0 && p.dutiesDone === p.duties.length : p.goal > 0 && p.goalPts >= p.goal)}><i style="width:{Math.max(0, 100 * p[f] / max)}%"></i></span>
           <small>
-            {#if seg === 'heute'}{p.goal ? `Tagesziel ${p.goal}` : 'heute frei'}
+            {#if seg === 'heute'}{plan ? (p.duties.length ? `${p.dutiesDone} von ${p.duties.length} Diensten` : 'heute keine Dienste') : p.goal ? `Tagesziel ${p.goalPts}/${p.goal}` : 'heute frei'}
             {:else if seg === 'woche'}{p.cnt} Aufgaben{p.streak ? ` · Serie ${p.streak}` : ''}{p.bonus ? ` · ${p.bonus}x belohnt` : ''}{p.warn ? ` · ${p.warn}x abgemahnt` : ''}
-            {:else}Konto {p.bank} P{/if}
+            {:else}{plan ? 'im Monat' : `Konto ${p.bank} P`}{/if}
           </small>
         </div>
         <span class="num">{p[f]}</span>
@@ -52,9 +61,9 @@
     {/each}
   </section>
 
-  {#if total > 0}
+  {#if total > 0 || plan}
     <section class="card list">
-      <h2><Icon name="scale" />Fair-O-Meter <small>diese Woche, gemessen am eigenen Pensum</small></h2>
+      <h2><Icon name="scale" />Fair-O-Meter <small>{plan ? 'diese Woche: eigene Dienste erledigt' : 'diese Woche, gemessen am eigenen Pensum'}</small></h2>
       {#each ranked as m (m.id)}
         {@const [c, icon, text] = fair(m)}
         <div class="row"><span class="grow">{m.emoji} <b>{m.name}</b></span><span class="chip c-{c}"><Icon name={icon} size={14} />{text}</span></div>

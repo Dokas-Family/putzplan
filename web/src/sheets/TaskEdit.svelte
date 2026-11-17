@@ -10,7 +10,7 @@
   // svelte-ignore state_referenced_locally
   const admin = G.admin, isNew = !task;
   // svelte-ignore state_referenced_locally
-  let f = $state({ title: '', room: 'Wohnzimmer', freq: 'daily', day: 1, minutes: 5, leicht: false, per_person: false, active: true, ...(task || {}), points: task ? ptsOf(task) : 2 });
+  let f = $state({ title: '', room: 'Wohnzimmer', freq: 'daily', day: 1, minutes: 5, leicht: false, per_person: false, active: true, pflicht: true, ...(task || {}), points: task ? ptsOf(task) : 3 });
   let newRoom = $state(false), roomName = $state(''), roomIcon = $state('house');
   const rooms = $derived(allRooms(S.tasks, S.settings));
 
@@ -67,6 +67,14 @@
   <div class="grow"><label class="f" for="t-min">Dauer (Minuten)</label><input id="t-min" class="inp" type="number" min="1" max="240" bind:value={f.minutes} /></div>
 </div>
 <p class="hint" style="margin-top:6px">Punkte nach Anstrengung und Ekel-Faktor, nicht nur nach Zeit.</p>
+{#if !f.per_person}
+  <p class="f">Dienst oder Extra?</p>
+  <div class="seg" style="margin-bottom:4px">
+    <button class:on={f.pflicht} onclick={() => (f.pflicht = true)}><Icon name="calendar-check" size={16} /> Dienst</button>
+    <button class:on={!f.pflicht} onclick={() => (f.pflicht = false)}><Icon name="sparkles" size={16} /> Extra</button>
+  </div>
+  <p class="hint" style="margin-top:0">{f.pflicht ? 'Muss gemacht werden. Der Dienstplan gibt es jeden Tag reihum jemandem.' : 'Freiwilliger Kleinkram, bringt Punkte obendrauf.'}</p>
+{/if}
 <label class="chk"><input type="checkbox" bind:checked={f.leicht} />Leicht, können auch Kinder</label>
 <label class="chk"><input type="checkbox" bind:checked={f.per_person} />Jeder macht das für sich (z. B. eigenes Zimmer)</label>
 {#if admin}<label class="chk"><input type="checkbox" bind:checked={f.active} />Aktiv</label>{/if}

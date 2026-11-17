@@ -1,5 +1,5 @@
-// Abläufe, die aus mehreren Schritten bestehen: Team wählen, Foto machen, speichern.
-import { S, G, post, del, mName } from './store.svelte.js';
+// Abläufe, die aus mehreren Schritten bestehen: Team wählen, Foto (oder Video) machen, speichern.
+import { S, G, post, del, mName, apply } from './store.svelte.js';
 import { open, toast, rain, tryDo } from './ui.svelte.js';
 import { DEFAULT_RAIN } from '../../../shared/logic.js';
 import Team from '../sheets/Team.svelte';
@@ -7,6 +7,20 @@ import Camera from '../sheets/Camera.svelte';
 
 const shoot = (label, kind) => open(Camera, { label, kind }, true);
 const CHEERS = ['Mega!', 'Stark gemacht!', 'Sauber!', 'Du rockst!', 'Haken dran!'];
+const photoOnly = img => ({ photo: img.photo, thumb: img.thumb });
+
+/** Das Video kommt nach dem Foto hinterher (roh, nicht als JSON). Klappt es nicht, bleibt das Foto trotzdem. */
+async function sendVideo(id, step, blob) {
+  if (!blob) return;
+  toast('Video wird hochgeladen …', 60000);
+  try {
+    const r = await fetch(`/api/entries/${id}/video?step=${step}`, { method: 'POST', headers: { 'Content-Type': blob.type || 'video/mp4', 'X-Putzplan': '1' }, body: blob });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Das Video ging nicht hoch');
+    for (const c of data.changes || []) apply(c);
+    toast('Video ist drin.');
+  } catch (e) { toast(`${e.message || 'Das Video ging nicht hoch'}. Das Foto ist aber gespeichert.`, 5000); }
+}
 
 /** Aufgabe aus dem Plan starten (task) oder eine zugewiesene/Extra-Aufgabe (entry). */
 export async function start({ task, entry }) {
@@ -15,8 +29,10 @@ export async function start({ task, entry }) {
   if (!team) return;
   const img = await shoot(title, 'before');
   if (!img) return;
-  if (await tryDo(() => post('/entries/start', { ...(task ? { task_id: task.id } : { entry_id: entry.id }), helpers: team, ...img }))) {
-    toast(team.length ? `Vorher-Foto ist drin. Los geht's im Team mit ${team.map(mName).join(' & ')}!` : 'Vorher-Foto ist drin. Jetzt loslegen!');
+  let res;
+  if (await tryDo(async () => { res = await post('/entries/start', { ...(task ? { task_id: task.id } : { entry_id: entry.id }), helpers: team, ...photoOnly(img) }); })) {
+    toast(team.length ? `Vorher ist drin. Los geht's im Team mit ${team.map(mName).join(' & ')}!` : 'Vorher ist drin. Jetzt loslegen!');
+    await sendVideo(res.id, 'before', img.video);
   }
 }
 export async function finish(e) {
@@ -25,14 +41,18 @@ export async function finish(e) {
   const img = await shoot(e.title, 'after');
   if (!img) return;
   let res;
-  if (await tryDo(async () => { res = await post(`/entries/${e.id}/finish`, img); })) {
+  if (await tryDo(async () => { res = await post(`/entries/${e.id}/finish`, photoOnly(img)); })) {
     rain(G.me?.rain || DEFAULT_RAIN);
     toast(`${CHEERS[Math.floor(Math.random() * CHEERS.length)]} +${res.points} Punkte`);
+    await sendVideo(e.id, 'after', img.video);
   }
 }
 export async function redo(e) {
   const img = await shoot(e.title, 'after');
-  if (img && (await tryDo(() => post(`/entries/${e.id}/redo`, img)))) toast('Neues Nachher-Foto ist drin.');
+  if (img && (await tryDo(() => post(`/entries/${e.id}/redo`, photoOnly(img))))) {
+    toast('Neues Nachher-Foto ist drin.');
+    await sendVideo(e.id, 'after', img.video);
+  }
 }
 export async function cancel(e) {
   if (confirm('Abbrechen? Das Vorher-Foto wird gelöscht.')) await tryDo(() => post(`/entries/${e.id}/cancel`));

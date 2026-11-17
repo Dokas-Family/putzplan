@@ -59,7 +59,7 @@
             <span class="chip c-{st[0]}"><Icon name={st[1]} size={14} />{st[2]}</span>
           {/if}
         </div>
-        <Pair entry={e} />
+        <Pair entry={e} likeable={e.status === 'done'} />
         {#if e.status === 'done'}<Reactions entry={e} />{/if}
         {#if G.admin && e.status === 'done'}
           <!-- Admins können jedes Urteil jederzeit ändern, auch bei schon Geprüftem -->

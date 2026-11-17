@@ -1,7 +1,8 @@
 // Push-Benachrichtigungen und der stündliche Wecker (Waschtag, Tagesziel).
 import * as webpush from 'web-push';
 import { q, getMeta, setMeta, logicState } from './db.js';
-import { isoDay, isAway, dayGoal, dayPoints, buildIndex } from '../shared/logic.js';
+import { isoDay, isAway, dayGoal, dayPoints, buildIndex, planOn, dutiesOn, isOpen } from '../shared/logic.js';
+import { ensurePlan, tell } from './plan.js';
 
 let keys = getMeta('vapid');
 if (!keys) { keys = webpush.generateVAPIDKeys(); setMeta('vapid', keys); }
@@ -22,10 +23,22 @@ export function notify(to, title, body) {
 }
 
 function hourly(d) {
+  ensurePlan(d); // ab 4 Uhr: Dienstplan für den Tag
   const st = logicState(), h = d.getHours(), wd = isoDay(d), tomorrow = wd % 7 + 1;
   const active = st.members.filter(m => m.active && !isAway(m, d));
   if (h === 7) for (const m of active) if (+m.waschtag === wd) notify(m.id, 'Heute ist dein Waschtag!', 'Wäschekorb runterbringen nicht vergessen.');
   if (h === 19) for (const m of active) if (+m.waschtag === tomorrow) notify(m.id, 'Morgen ist Waschtag', 'Denk an deinen Wäschekorb!');
+  if (planOn(st.settings, d)) {
+    const ix = buildIndex(st);
+    if (h === 7) tell(active.flatMap(m => dutiesOn(ix, m.id, d, d).filter(isOpen)));
+    if (h === 17 && st.settings.erinnerung) {
+      for (const m of active) {
+        const open = dutiesOn(ix, m.id, d, d).filter(isOpen);
+        if (open.length) notify(m.id, open.length === 1 ? 'Ein Dienst ist noch offen' : `Noch ${open.length} Dienste offen`, open.map(e => e.title).join(', '));
+      }
+    }
+    return;
+  }
   if (h === 17 && st.settings.erinnerung) {
     const ix = buildIndex(st);
     for (const m of active) {

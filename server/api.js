@@ -1,8 +1,9 @@
 // Alle Anfragen der App. Jede Regel (wer darf was, wie viele Punkte) wird hier geprüft, nicht im Handy.
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
-import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, inviteCode, newCode, savePhoto, delPhoto, logicState, since40, lastBackup } from './db.js';
+import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, inviteCode, newCode, savePhoto, delPhoto, delVideo, logicState, since40, lastBackup, PFLICHT_AB } from './db.js';
 import { on, Fail, now, emit, emitDel, emitSettings, emitSay, hashPin, checkPin, pinGuard, startSession, endSession, openStream, dropStreams, STREAM, VERSION } from './core.js';
 import { notify, publicKey } from './push.js';
+import { ensurePlan, initPlan, takeBack, freeUp, tell } from './plan.js';
 import * as L from '../shared/logic.js';
 
 // ---------- Helfer ----------
@@ -24,6 +25,15 @@ function addLog(me, text, undo) {
   emit('log', row('log', Number(r.lastInsertRowid)), { adminOnly: true });
 }
 const picker = () => q.all('select id, name, emoji, pin_hash from members where active = 1 order by sort, name').map(m => ({ id: m.id, name: m.name, emoji: m.emoji, has_pin: !!m.pin_hash }));
+/** Offene Dienste einer Person (zugeteilt, noch nicht erledigt). */
+const openDuties = id => q.all("select * from entries where member_id = ? and status in ('todo', 'started')", id).map(r => out('entries', r)).filter(L.isDuty);
+/** Mit Dienstplan gibt es Extras erst, wenn die eigenen Dienste erledigt sind. */
+function extrasAllowed(me) {
+  const s = settings();
+  if (!L.planOn(s, new Date()) || !s.extras_sperre) return;
+  const n = openDuties(me.id).length;
+  if (n) throw new Fail(403, `Erst deine Dienste, dann Extras. Noch ${n} offen.`);
+}
 
 // ---------- Beitreten und Anmelden ----------
 on('GET', '/api/session', 'open', ({ sess, me }) => ({ joined: !!sess, me: me?.active ? me.id : null, members: sess ? picker() : [] }));
@@ -79,6 +89,7 @@ on('POST', '/api/leave', 'device', ({ sess, res }) => { endSession(sess, res); }
 
 // ---------- Zustand und Live-Kanal ----------
 on('GET', '/api/state', 'member', ({ me }) => {
+  ensurePlan(); // falls der Wecker um 4 Uhr (z. B. wegen eines Neustarts) nicht dran war
   const st = logicState(), ids = new Set(st.entries.map(e => e.id));
   return {
     me: me.id, ...st,
@@ -109,12 +120,14 @@ on('POST', '/api/entries/start', 'member', ({ body, me }) => {
     const e = entry(body.entry_id);
     id = e.id;
     if (e.member_id !== me.id) throw new Fail(403, 'Das ist nicht deine Aufgabe');
-    if (e.status !== 'todo') throw new Fail(409, 'Die Aufgabe läuft schon');
+    if (e.status !== 'todo') throw new Fail(e.status === 'missed' ? 410 : 409, e.status === 'missed' ? 'Der Tag für diesen Dienst ist vorbei' : 'Die Aufgabe läuft schon');
+    if (!L.isDuty(e)) extrasAllowed(me);
     patch('entries', id, { status: 'started', before_photo: savePhoto(id + '-v', body.photo, body.thumb), before_at: iso, helpers });
   } else {
     const t = body.task_id === 'wasch' ? L.WASCH : out('tasks', need('tasks', body.task_id, 'Aufgabe nicht gefunden'));
     if (!t.active || !L.activeOn(t, d)) throw new Fail(400, 'Diese Aufgabe ist heute nicht dran');
     if (t.virtual && +me.waschtag !== L.isoDay(d)) throw new Fail(400, 'Heute ist nicht dein Waschtag');
+    if (!t.pflicht && !t.per_person) extrasAllowed(me); // Dienste ohne Besitzer und eigene Aufgaben gehen immer
     const period = L.periodOf(t, d), slot = L.slotOf(t, me.id);
     if (q.get("select id from entries where task_id = ? and period = ? and slot = ? and status <> 'rejected'", t.id, period, slot)) throw new Fail(409, 'Oha, da war jemand schneller');
     id = randomUUID();
@@ -130,6 +143,7 @@ on('POST', '/api/entries/start', 'member', ({ body, me }) => {
   const e = row('entries', id);
   if (helpers.length) notify(helpers, 'Teamwork!', `${me.name} hat dich dazugeholt: ${e.title}`);
   emit('entries', e);
+  return { id };
 });
 on('POST', '/api/entries/:id/finish', 'member', ({ p, body, me }) => {
   const e = entry(p.id);
@@ -157,10 +171,11 @@ on('POST', '/api/entries/:id/cancel', 'member', ({ p, me }) => {
   const e = entry(p.id);
   if (e.member_id !== me.id && me.role !== 'admin') throw new Fail(403, 'Das ist nicht deine Aufgabe');
   if (e.status !== 'started') throw new Fail(409, 'Diese Aufgabe läuft nicht');
-  // Zugewiesenes bleibt auf der Liste, alles andere wird wieder frei
-  if (e.task_id === 'adhoc') patch('entries', e.id, { status: 'todo', before_photo: null, before_at: null, helpers: [] });
-  else patch('entries', e.id, { status: 'rejected', note: 'abgebrochen', before_photo: null });
+  // Dienste und Eigenes bleiben auf der Liste, alles andere wird wieder frei
+  if (e.task_id === 'adhoc' || L.isDuty(e)) patch('entries', e.id, { status: 'todo', before_photo: null, before_at: null, before_video: null, helpers: [] });
+  else patch('entries', e.id, { status: 'rejected', note: 'abgebrochen', before_photo: null, before_video: null });
   delPhoto(e.before_photo);
+  delVideo(e.before_video);
   emitEntry(e.id);
 });
 on('POST', '/api/entries/:id/join', 'member', ({ p, me }) => {
@@ -173,16 +188,17 @@ on('POST', '/api/entries/:id/join', 'member', ({ p, me }) => {
 });
 on('POST', '/api/entries/adhoc', 'member', ({ body, me }) => {
   const kind = body.kind, iso = now(), id = randomUUID();
-  let who = me.id, points = 2, title = str(body.title, 120);
+  let who = me.id, points = 2, title = str(body.title, 120), note = null;
   if (kind === 'koch') {
     if (!settings().koch_regel) throw new Fail(400, 'Die Koch-Regel ist ausgeschaltet');
-    who = member(body.member_id).id; points = 3; title = 'Gekocht? Töpfe, Pfannen & Herd sauber machen und wegräumen';
+    who = member(body.member_id).id; points = 3; title = 'Gekocht? Töpfe, Pfannen & Herd sauber machen und wegräumen'; note = 'koch';
   } else if (kind === 'assign') {
     if (me.role !== 'admin') throw new Fail(403, 'Nur Admins können Aufgaben zuweisen');
     who = member(body.member_id).id; points = int(body.points, 1, 30, 3);
-  } else if (kind !== 'extra') throw new Fail(400, 'Unbekannte Art');
+  } else if (kind === 'extra') extrasAllowed(me);
+  else throw new Fail(400, 'Unbekannte Art');
   if (!title) throw new Fail(400, 'Was ist zu tun?');
-  insert('entries', { id, task_id: 'adhoc', title, member_id: who, period: L.dKey(new Date()), slot: who, status: 'todo', points, created_at: iso, created_by: me.id, helpers: [] });
+  insert('entries', { id, task_id: 'adhoc', title, member_id: who, period: L.dKey(new Date()), slot: who, status: 'todo', points, note, created_at: iso, created_by: me.id, helpers: [] });
   if (who !== me.id) notify(who, 'Neue Aufgabe für dich', title);
   if (kind === 'assign') addLog(me, `hat ${nameOf(who)} „${title}“ zugewiesen`, [{ t: 'entries', id, del: true, only: { status: 'todo' } }]);
   emitEntry(id);
@@ -198,6 +214,7 @@ on('DELETE', '/api/entries/:id', 'member', ({ p, me }) => {
 // ---------- Punktekonto und freier Tag der Wochensieger ----------
 on('POST', '/api/redeem', 'member', ({ me }) => {
   const st = logicState(), ix = L.buildIndex(st), d = L.noon(), m = out('members', me);
+  if (L.planOn(st.settings, d)) throw new Fail(400, 'Mit dem Dienstplan gibt es kein Punktekonto mehr');
   const amount = Math.min(L.bank(ix, m, st, d), L.dayGoal(m, d, st.settings) - L.dayPoints(ix, m.id, d));
   if (amount <= 0) throw new Fail(400, 'Gerade gibt es nichts einzulösen');
   const id = randomUUID(), iso = now();
@@ -215,6 +232,7 @@ on('POST', '/api/royal', 'member', ({ body, me }) => {
   const id = randomUUID();
   insert('entries', { id, task_id: 'frei', title: 'Königlicher freier Tag', note: 'royal', member_id: m.id, period: L.dKey(d), slot: id, status: 'done', points: L.dayGoal(m, d, st.settings) || 1, after_at: d.toISOString(), created_at: now(), created_by: m.id, helpers: [] });
   emitEntry(id);
+  if (L.dKey(d) === L.dKey(today)) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
 });
 
 // ---------- Reaktionen und Kommentare ----------
@@ -237,6 +255,32 @@ on('POST', '/api/reactions', 'member', ({ body, me }) => {
   notify(others, `${body.emoji} ${me.name}`, `hat auf dein Foto reagiert: ${e.title}`);
   emit('reactions', row('reactions', id));
 });
+/**
+ * Claude als System-Konto. Geht nur vom Server selbst aus (node server/claude.js im Container) und nur mit dem
+ * Schlüssel, der in der Datenbank liegt. Über den Proxy von außen kommt hier niemand durch.
+ */
+function systemOnly(req) {
+  const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) && !req.headers['x-forwarded-for'];
+  const key = getMeta('system_token'), given = String(req.headers['x-system-token'] || '');
+  const a = Buffer.from(createHash('sha256').update(given).digest('hex')), b = Buffer.from(createHash('sha256').update(String(key)).digest('hex'));
+  if (!local || !key || !timingSafeEqual(a, b)) throw new Fail(403, 'Nur vom Server aus');
+}
+on('POST', '/api/system/say', 'open', ({ req, body }) => {
+  systemOnly(req);
+  const e = entry(body.entry_id), team = [e.member_id, ...e.helpers], id = randomUUID();
+  if (body.text != null) {
+    const text = str(body.text, 600);
+    if (!text) throw new Fail(400, 'Der Kommentar ist leer');
+    insert('reactions', { id, entry_id: e.id, member_id: L.SYSTEM.id, text, created_at: now() });
+    notify(team, 'Claude ✨', `${text} (${e.title})`);
+  } else {
+    if (!L.REACTS.includes(body.emoji)) throw new Fail(400, 'Diese Reaktion gibt es nicht');
+    if (q.get('select id from reactions where entry_id = ? and member_id = ? and emoji = ?', e.id, L.SYSTEM.id, body.emoji)) return;
+    insert('reactions', { id, entry_id: e.id, member_id: L.SYSTEM.id, emoji: body.emoji, created_at: now() });
+  }
+  emit('reactions', row('reactions', id));
+  return { id };
+});
 on('DELETE', '/api/reactions/:id', 'member', ({ p, me }) => {
   const r = need('reactions', p.id);
   if (r.member_id !== me.id && me.role !== 'admin') throw new Fail(403, 'Das ist nicht deins');
@@ -251,13 +295,18 @@ on('POST', '/api/me', 'member', ({ body, me }) => {
 });
 
 // ---------- Vorschläge und Aufgaben-Verwaltung ----------
-const taskFields = b => ({
-  title: str(b.title, 120), room: str(b.room, 40) || 'Extra', freq: L.FREQ[b.freq] ? b.freq : 'daily', day: int(b.day, 0, 28, 0),
-  minutes: int(b.minutes, 1, 240, 5), points: int(b.points, 1, 30, 1), leicht: !!b.leicht, per_person: !!b.per_person, active: b.active !== false,
-});
+const taskFields = (b, old) => {
+  const f = {
+    title: str(b.title, 120), room: str(b.room, 40) || 'Extra', freq: L.FREQ[b.freq] ? b.freq : 'daily', day: int(b.day, 0, 28, 0),
+    minutes: int(b.minutes, 1, 240, 5), points: int(b.points, 1, 30, 1), leicht: !!b.leicht, per_person: !!b.per_person, active: b.active !== false,
+  };
+  // Dienst oder Extra: wie angegeben, sonst wie bisher, bei Neuem nach Punkten
+  f.pflicht = !f.per_person && (b.pflicht != null ? !!b.pflicht : old ? !!old.pflicht : f.points >= PFLICHT_AB);
+  return f;
+};
 on('PUT', '/api/tasks/:id', 'member', ({ p, body, me }) => {
   if (!isId(p.id) || L.SPECIAL.has(p.id) || p.id === 'wasch') throw new Fail(400, 'Ungültige Kennung');
-  const old = row('tasks', p.id), f = taskFields(body);
+  const old = row('tasks', p.id), f = taskFields(body, old);
   if (!f.title) throw new Fail(400, 'Die Aufgabe braucht einen Namen');
   if (me.role !== 'admin') {
     if (old) throw new Fail(403, 'Nur Admins können Aufgaben ändern');
@@ -324,6 +373,27 @@ on('POST', '/api/entries/reward', 'admin', ({ body, me }) => {
   insert('entries', { id, task_id: kind, title, member_id: m.id, period, slot: id, status: 'done', points, after_at, created_at: iso, created_by: me.id, helpers: [] });
   addLog(me, text, [{ t: 'entries', id, patch: { status: 'rejected' } }]);
   emitEntry(id);
+  if (kind === 'frei' && period === L.dKey(new Date())) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
+});
+/** Admins: einen Dienst jemand anderem geben. */
+on('POST', '/api/entries/:id/reassign', 'admin', ({ p, body, me }) => {
+  const e = entry(p.id), m = member(body.member_id);
+  if (e.status !== 'todo') throw new Fail(409, 'Schon angefangen oder vorbei, lässt sich nicht mehr umverteilen');
+  if (!m.active) throw new Fail(400, 'Diese Person ist pausiert');
+  if (m.id === e.member_id) return;
+  patch('entries', e.id, { member_id: m.id, slot: e.task_id === 'adhoc' ? m.id : e.slot });
+  if (m.id !== me.id) notify(m.id, 'Neuer Dienst für dich', e.title);
+  addLog(me, `hat „${e.title}“ von ${nameOf(e.member_id)} an ${m.name} gegeben`, [{ t: 'entries', id: e.id, patch: { member_id: e.member_id, slot: e.slot }, only: { status: 'todo' } }]);
+  emitEntry(e.id);
+});
+/** Admins: den heutigen Dienstplan neu verteilen (z. B. nachdem Aufgaben geändert wurden). Angefangenes bleibt. */
+on('POST', '/api/plan/redo', 'admin', ({ me }) => {
+  if (!L.planOn(settings(), new Date())) throw new Fail(400, 'Der Dienstplan ist aus');
+  takeBack();
+  const made = ensurePlan(new Date(), { force: true });
+  tell(made, 'Dienstplan neu verteilt, deine Dienste heute');
+  addLog(me, `hat den Dienstplan für heute neu verteilt (${made.length} Dienste)`);
+  return { count: made.length };
 });
 on('POST', '/api/entries/:id/revoke', 'admin', ({ p, me }) => {
   const e = entry(p.id);
@@ -367,6 +437,7 @@ on('PUT', '/api/members/:id', 'admin', ({ p, body, me }) => {
   if (old && (old.role !== f.role || !f.active)) dropStreams(p.id);
   addLog(me, old ? `hat die Einstellungen von ${f.name} geändert` : `hat ${f.name} hinzugefügt`);
   emit('members', row('members', p.id));
+  if (old && (!f.active || L.isAway(f, new Date()))) freeUp(p.id); // heute nicht da: die Dienste gehen an die anderen
 });
 on('DELETE', '/api/members/:id', 'admin', ({ p, me }) => {
   const m = member(p.id);
@@ -392,10 +463,13 @@ on('PUT', '/api/settings', 'admin', ({ body, me }) => {
     min_minutes: int(body.min_minutes, 0, 60, s.min_minutes), tagesziel: int(body.tagesziel, 1, 50, s.tagesziel),
     ziel_gross: int(body.ziel_gross, 0, 50, s.ziel_gross ?? 10), ziel_klein: int(body.ziel_klein, 0, 50, s.ziel_klein ?? 6),
     koch_regel: body.koch_regel ?? s.koch_regel ? true : false, review_first: body.review_first ?? s.review_first ? true : false, erinnerung: body.erinnerung ?? s.erinnerung ? true : false, rooms,
+    dienste: body.dienste ?? s.dienste ? true : false, extras_sperre: body.extras_sperre ?? s.extras_sperre ? true : false,
   };
   setMeta('settings', next);
-  addLog(me, 'hat die Regeln geändert');
-  emitSettings(next);
+  if (next.dienste && !s.dienste) { setMeta('plan_start', null); initPlan(); ensurePlan(); } // wieder eingeschaltet: neu beginnen
+  if (!next.dienste && s.dienste) takeBack(); // ausgeschaltet: Unangefangenes von heute wieder einsammeln
+  addLog(me, next.dienste !== s.dienste ? `hat den Dienstplan ${next.dienste ? 'eingeschaltet' : 'ausgeschaltet'}` : 'hat die Regeln geändert');
+  emitSettings(settings());
 });
 const doorUntil = () => { const d = getMeta('v1_door'); return d && d.until > now() ? d.until : null; };
 on('GET', '/api/invite', 'admin', () => ({ code: inviteCode(), v1_until: doorUntil() }));

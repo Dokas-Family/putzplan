@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import jpeg from 'jpeg-js';
+import * as L from '../shared/logic.js';
 
 const DATA = mkdtempSync(join(tmpdir(), 'putzplan-test-'));
 const PORT = 4700 + Math.floor(Math.random() * 250);
@@ -16,7 +17,9 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let srv, code, db;
 
 before(async () => {
-  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test' }, stdio: ['ignore', 'pipe', 'inherit'] });
+  // Der Dienstplan startet hier erst „in ferner Zukunft“, damit die Tests nicht von der Uhrzeit abhängen.
+  // Der Test zum Dienstplan schaltet ihn gezielt ein.
+  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test', PLAN_START: '2999-01-01' }, stdio: ['ignore', 'pipe', 'inherit'] });
   code = await new Promise((resolve, reject) => {
     let out = '';
     const timer = setTimeout(() => reject(new Error('Server startet nicht: ' + out)), 15000);
@@ -43,6 +46,8 @@ function device() {
   return {
     get: (p, h) => call('GET', p, null, h), post: (p, b, h) => call('POST', p, b, h), put: (p, b) => call('PUT', p, b), del: p => call('DELETE', p),
     raw: (p, headers = {}, signal) => fetch(BASE + p, { redirect: 'manual', signal, headers: { Cookie: cookie, ...headers } }),
+    /** Rohe Daten schicken (Video), nicht als JSON. */
+    send: async (p, body, headers = {}) => { const r = await fetch(BASE + p, { method: 'POST', body, headers: { Cookie: cookie, ...headers } }); return { status: r.status, ...(await r.json().catch(() => ({}))) }; },
     async enter(member_id, pin) { await this.post('/api/join', { code }); return this.post('/api/login', { member_id, pin }); },
   };
 }
@@ -310,6 +315,75 @@ test('Übergangstür: alte Geräte kommen mit dem V1-Geheimcode herein, aber nur
   assert.equal((await device().post('/api/join', { code })).status, 403);
   code = neu.code;
   assert.equal((await device().post('/api/join', { code })).joined, true);
+});
+
+test('Dienstplan: verteilt fair, Kinder nur Leichtes, Extras erst nach den Diensten, frei gibt Dienste ab', async () => {
+  const today = L.dKey(new Date());
+  db.prepare("insert into meta (key, value) values ('plan_start', ?) on conflict (key) do update set value = excluded.value").run(JSON.stringify(today));
+  let r = await admin.post('/api/plan/redo');
+  assert.ok(r.count > 0, 'es wurden Dienste verteilt');
+  let st = await admin.get('/api/state');
+  assert.equal(st.settings.plan_start, today);
+  const tasks = new Map(st.tasks.map(t => [t.id, t]));
+  const duties = () => st.entries.filter(e => e.created_by === 'plan' && e.status === 'todo');
+  assert.ok(duties().every(e => tasks.get(e.task_id).pflicht), 'nur Dienste werden verteilt, keine Extras');
+  assert.ok(duties().filter(e => e.member_id === LILY).every(e => tasks.get(e.task_id).leicht), 'Kinder bekommen nur Leichtes');
+  assert.ok(new Set(duties().map(e => e.member_id)).size >= 2, 'mehr als eine Person hat Dienste');
+
+  // Wer noch Dienste hat, bekommt keine Extras. Die eigenen Dienste gehen natürlich.
+  const dev = { [ADMIN]: admin, [MIA]: mia, [LILY]: lily };
+  const busy = duties()[0], who = dev[busy.member_id];
+  r = await who.post('/api/entries/start', { task_id: 'wz-decken', ...photo });
+  assert.equal(r.status, 403);
+  assert.match(r.error, /Erst deine Dienste/);
+  assert.equal((await who.post('/api/entries/adhoc', { kind: 'extra', title: 'Schnell was Kleines' })).status, 403);
+  assert.equal(entryOf(await who.post('/api/entries/start', { entry_id: busy.id, ...photo })).status, 'started');
+  assert.equal(entryOf(await who.post(`/api/entries/${busy.id}/cancel`)).status, 'todo'); // ein Dienst bleibt bei der Person
+  assert.equal((await who.post('/api/redeem')).status, 400); // kein Punktekonto mit Dienstplan
+
+  // Admins geben einen Dienst weiter
+  const give = duties().find(e => e.member_id !== MIA);
+  assert.equal(entryOf(await admin.post(`/api/entries/${give.id}/reassign`, { member_id: MIA })).member_id, MIA);
+  assert.equal((await mia.post(`/api/entries/${give.id}/reassign`, { member_id: LILY })).status, 403);
+
+  // Wer heute frei bekommt, gibt seine Dienste ab, sie gehen an die anderen
+  st = await admin.get('/api/state');
+  const before = duties().length;
+  await admin.post('/api/entries/reward', { kind: 'frei', member_id: MIA, when: 0 });
+  st = await admin.get('/api/state');
+  assert.equal(duties().filter(e => e.member_id === MIA).length, 0);
+  assert.ok(duties().length >= before - 1, 'die Dienste sind nicht verschwunden, nur umverteilt');
+});
+
+test('Video zum Foto: nur Beteiligte, nur echte Videos, abspielbar in Stücken', async () => {
+  const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(88, 7)]);
+  const path = `/api/entries/${entry.id}/video?step=after`, head = { 'Content-Type': 'video/mp4', 'X-Putzplan': '1' };
+  assert.equal((await mia.send(path, mp4, { 'Content-Type': 'video/mp4' })).status, 403); // ohne eigenen Kopf
+  assert.equal((await admin.send(path, mp4, head)).status, 403); // war nicht dabei
+  assert.equal((await mia.send(path, Buffer.from('kein video'), head)).status, 400);
+  const r = await mia.send(path, mp4, head);
+  assert.equal(r.status, 200);
+  assert.equal(entryOf(r).after_video, r.name);
+  const part = await mia.raw('/photos/' + r.name, { Range: 'bytes=0-9' });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get('content-range'), `bytes 0-9/${mp4.length}`);
+  assert.equal((await part.arrayBuffer()).byteLength, 10);
+  assert.equal((await device().raw('/photos/' + r.name)).status, 401);
+});
+
+test('Claude als System-Konto: nur vom Server aus und nur mit Schlüssel', async () => {
+  const say = (body, headers = {}) => fetch(BASE + '/api/system/say', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  assert.equal((await say({ entry_id: entry.id, text: 'Hallo' })).status, 403);
+  db.prepare("insert into meta (key, value) values ('system_token', ?) on conflict (key) do update set value = excluded.value").run(JSON.stringify('test-schluessel'));
+  assert.equal((await say({ entry_id: entry.id, text: 'Hallo' }, { 'X-System-Token': 'falsch' })).status, 403);
+  assert.equal((await say({ entry_id: entry.id, text: 'Hallo' }, { 'X-System-Token': 'test-schluessel', 'X-Forwarded-For': '1.2.3.4' })).status, 403); // über den Proxy nie
+  const r = await (await say({ entry_id: entry.id, text: 'Wow, die Spülmaschine glänzt!' }, { 'X-System-Token': 'test-schluessel' })).json();
+  const c = r.changes[0].row;
+  assert.equal(c.member_id, 'claude');
+  assert.equal((await say({ entry_id: entry.id, emoji: '👏' }, { 'X-System-Token': 'test-schluessel' })).status, 200);
+  assert.ok((await mia.get('/api/state')).reactions.some(x => x.id === c.id));
+  assert.equal((await mia.del('/api/reactions/' + c.id)).status, 403);
+  assert.equal((await admin.del('/api/reactions/' + c.id)).changes[0].del, c.id);
 });
 
 test('www leitet auf die Hauptadresse um, die Version ist abfragbar', async () => {

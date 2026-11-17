@@ -31,14 +31,21 @@ const me = $derived(byId.get(S.meId) || null);
 const reactionsBy = $derived.by(() => { const m = new Map(); for (const r of S.reactions) (m.get(r.entry_id) || m.set(r.entry_id, []).get(r.entry_id)).push(r); return m; });
 const calc = $derived.by(() => {
   const st = { members: S.members, tasks: S.tasks, entries: S.entries, settings: S.settings };
-  const d = new Date(S.now), ix = L.buildIndex(st), wk = L.weekPoints(st, d), mo = L.monthPoints(st, d), per = {};
+  const d = new Date(S.now), ix = L.buildIndex(st), plan = L.planOn(st.settings, d);
+  const dy = L.dayTotals(st, d), wk = L.weekPoints(st, d), mo = L.monthPoints(st, d), per = {};
   for (const m of S.members) {
+    const duties = plan ? L.dutiesOn(ix, m.id, d, d) : [];
     per[m.id] = {
-      today: L.dayPoints(ix, m.id, d), goal: L.dayGoal(m, d, st.settings), week: wk.pts[m.id] || 0, cnt: wk.cnt[m.id] || 0,
-      warn: wk.warn[m.id] || 0, bonus: wk.bonus[m.id] || 0, month: mo.pts[m.id] || 0, streak: L.streak(ix, m, st, d), bank: L.bank(ix, m, st, d),
+      // Punkte: heute, Woche, Monat zählen alle gleich (Aufgaben, Belohnungen, Abmahnungen)
+      today: dy.pts[m.id] || 0, week: wk.pts[m.id] || 0, month: mo.pts[m.id] || 0,
+      cnt: wk.cnt[m.id] || 0, warn: wk.warn[m.id] || 0, bonus: wk.bonus[m.id] || 0, streak: L.streak(ix, m, st, d),
+      // Dienstplan: was jemand heute hat und wie viel davon erledigt ist
+      duties, dutiesDone: duties.filter(e => e.status === 'done').length, dutyWeek: plan ? L.dutyWeek(ix, m.id, d) : null,
+      // ohne Dienstplan: altes Tagesziel in Punkten und Konto
+      goal: plan ? 0 : L.dayGoal(m, d, st.settings), goalPts: L.dayPoints(ix, m.id, d), bank: plan ? 0 : L.bank(ix, m, st, d),
     };
   }
-  return { st, d, ix, per, today: L.dKey(d) };
+  return { st, d, ix, per, plan, today: L.dKey(d) };
 });
 /** Abgeleitete Werte. Als Getter, damit Komponenten immer den aktuellen Stand lesen. */
 export const G = {
@@ -46,6 +53,13 @@ export const G = {
   get admin() { return me?.role === 'admin'; },
   get kid() { return me?.role === 'kind'; },
   get calc() { return calc; },
+  /** Gilt heute der Dienstplan? */
+  get plan() { return calc.plan; },
+  /** Offene Dienste von mir. Solange es welche gibt, sind Extras gesperrt (wenn die Regel an ist). */
+  get myOpen() { return me ? L.openDuties(calc.ix, me.id) : []; },
+  get extrasLocked() { return calc.plan && !!S.settings.extras_sperre && G.myOpen.length > 0; },
+  /** Der Dienstplan startet bald (eingeschaltet, aber erst ab morgen). */
+  get planSoon() { return !!S.settings.dienste && !!S.settings.plan_start && S.settings.plan_start > calc.today; },
   get active() { return S.members.filter(m => m.active); },
   /** Erledigte Aufgaben, die noch niemand geprüft hat (älteste zuerst). */
   get queue() { return S.entries.filter(e => e.status === 'done' && !e.review && !L.ADMIN_KINDS.has(e.task_id)).sort((a, b) => (a.after_at || '').localeCompare(b.after_at || '')); },
@@ -58,9 +72,10 @@ export const G = {
   get shared() { const d = calc.d; return S.tasks.filter(t => t.active && !t.per_person && L.activeOn(t, d) && (L.dueOn(t, d) || L.overdueInPeriod(t, d))); },
   get late() { const { d, ix } = calc; return G.shared.filter(t => L.overdueInPeriod(t, d) && !L.entryFor(ix, t, d, null)); },
 };
-export const mem = id => byId.get(id);
-export const mName = id => byId.get(id)?.name || 'Jemand';
-export const mEmoji = id => byId.get(id)?.emoji || '🙂';
+export const mem = id => byId.get(id) || (id === L.SYSTEM.id ? L.SYSTEM : undefined);
+export const mName = id => mem(id)?.name || 'Jemand';
+export const mEmoji = id => mem(id)?.emoji || '🙂';
+export const isSystem = id => id === L.SYSTEM.id;
 export const reactionsOf = id => reactionsBy.get(id) || [];
 export const taskOf = id => (id === 'wasch' ? L.WASCH : S.tasks.find(t => t.id === id));
 

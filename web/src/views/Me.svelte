@@ -8,6 +8,7 @@
   import EmojiEdit from '../sheets/EmojiEdit.svelte';
   import TaskEdit from '../sheets/TaskEdit.svelte';
   import Invite from '../sheets/Invite.svelte';
+  import Help from '../sheets/Help.svelte';
 
   const me = $derived(G.me), my = $derived(G.calc.per[me.id]);
   const waiting = $derived(S.tasks.filter(t => t.proposed_by === me.id));
@@ -32,14 +33,16 @@
       <div class="grow"><h1>{me.name}</h1><span class="chip c-brand" style="margin-top:4px"><Icon name={me.role === 'admin' ? 'shield-check' : 'user'} size={14} />{ROLES[me.role]}</span></div>
     </div>
     <div class="stats">
-      <div><b>{my.today}{my.goal ? '/' + my.goal : ''}</b><small>heute</small></div>
-      <div><b>{my.week}</b><small>Woche</small></div>
+      <div><b>{my.today}</b><small>P heute</small></div>
+      <div><b>{my.week}</b><small>P Woche</small></div>
+      <div><b>{my.month}</b><small>P Monat</small></div>
       <div><b>{my.streak}</b><small>Tage Serie</small></div>
-      <div><b>{my.bank}</b><small>im Konto</small></div>
     </div>
+    {#if G.plan && my.dutyWeek?.total}<p class="hint">Diese Woche {my.dutyWeek.done} von {my.dutyWeek.total} Diensten erledigt.</p>{:else if !G.plan && my.bank}<p class="hint">{my.bank} Punkte im Konto.</p>{/if}
   </section>
 
   <section class="card list">
+    {@render item('circle-help', 'So funktioniert der Putzplan', 'Dienste, Extras, Punkte, Serie', () => open(Help))}
     {@render item('history', 'Meine Punkte', 'Alle Einträge, Belohnungen und Abzüge', () => open(Points))}
     {@render item('smile', 'Mein Emoji & Emoji-Regen', `${me.emoji} · ${me.rain || 'Standard-Regen'}`, () => open(EmojiEdit))}
     {@render item('bell', 'Benachrichtigungen', push ? 'Sind an. Antippen für eine Test-Nachricht.' : isIOS && !isStandalone() ? 'Erst die App auf den Home-Bildschirm legen' : 'Waschtag, Tagesziel, Reaktionen, Belohnungen', notif)}

@@ -14,8 +14,10 @@
   let tab = $state('aufgaben'), search = $state(''), room = $state('alle');
   const tasks = $derived(S.tasks.filter(t => !t.proposed_by).sort((a, b) => a.room.localeCompare(b.room) || a.title.localeCompare(b.title)));
   const rooms = $derived([...new Set(tasks.map(t => t.room))]);
-  const shown = $derived(tasks.filter(t => (room === 'alle' || t.room === room) && t.title.toLowerCase().includes(search.trim().toLowerCase())));
+  const shown = $derived(tasks.filter(t => (room === 'alle' || t.room === room) && (only === 'alle' || (only === 'dienst' ? t.pflicht && !t.per_person : !t.pflicht && !t.per_person)) && t.title.toLowerCase().includes(search.trim().toLowerCase())));
   const meta = t => `${L.FREQ[t.freq]}${t.freq === 'weekly' ? ` (${L.DAYS_SHORT[t.day || 1]})` : t.freq === 'monthly' ? ` (ab ${t.day || 1}.)` : ''} · ${t.minutes} Min · ${L.ptsOf(t)} P${t.leicht ? ' · auch für Kinder' : ''}${t.per_person ? ' · jeder für sich' : ''}`;
+  const kind = t => (t.per_person ? null : t.pflicht ? ['brand', 'Dienst'] : ['warn', 'Extra']);
+  let only = $state('alle'); // alle | dienst | extra
   const toggle = t => tryDo(() => post(`/tasks/${t.id}/active`, { active: !t.active }));
 
   const load = v => (v === 0 ? 'nichts' : v < 0.5 ? 'ganz wenig' : v < 1 ? 'weniger' : v === 1 ? 'normal' : 'mehr');
@@ -24,7 +26,7 @@
 
   // Regeln: erst lokal ändern, dann speichern
   let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings });
-  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung'].some(k => rules[k] !== S.settings[k]));
+  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre'].some(k => rules[k] !== S.settings[k]));
   const saveRules = async () => (await tryDo(() => put('/settings', rules))) && toast('Regeln gespeichert');
 
   const stamp = iso => { const d = new Date(iso); return d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
@@ -49,6 +51,10 @@
       <input class="inp" bind:value={search} placeholder="Aufgabe suchen" />
       <button class="btn sm" onclick={() => open(TaskEdit)}><Icon name="plus" size={16} />Neu</button>
     </div>
+    <div class="seg">
+      {#each [['alle', 'Alle'], ['dienst', 'Dienste'], ['extra', 'Extras']] as [k, l] (k)}<button class:on={only === k} onclick={() => (only = k)}>{l} <small style="display:inline">{k === 'alle' ? tasks.length : tasks.filter(t => !t.per_person && (k === 'dienst') === !!t.pflicht).length}</small></button>{/each}
+    </div>
+    {#if only !== 'alle'}<p class="hint" style="margin:-4px 2px 10px">{only === 'dienst' ? 'Dienste verteilt der Dienstplan jeden Morgen reihum.' : 'Extras sind freiwillig und bringen Punkte obendrauf.'} Umstellen über den Stift bei der Aufgabe.</p>{/if}
     <div class="filter">
       <button class:on={room === 'alle'} onclick={() => (room = 'alle')}>Alle <em>{tasks.length}</em></button>
       {#each rooms as r (r)}<button class:on={room === r} onclick={() => (room = r)}><Icon name={roomOf(r, S.settings).icon} size={16} />{r}</button>{/each}
@@ -58,7 +64,7 @@
         {@const r = roomOf(t.room, S.settings)}
         <div class="row" style={t.active ? '' : 'opacity:.55'}>
           <span class="tile" style="--c:{r.color}"><Icon name={r.icon} /></span>
-          <div class="grow"><b>{t.title}</b><small>{meta(t)}</small></div>
+          <div class="grow"><b>{t.title}</b>{#if kind(t)}{@const k = kind(t)} <span class="chip c-{k[0]}">{k[1]}</span>{/if}<small>{meta(t)}</small></div>
           <button class="icb" onclick={() => open(TaskEdit, { task: t })} aria-label="Bearbeiten"><Icon name="pencil" size={16} /></button>
           {@render sw(t.active, () => toggle(t), 'Aufgabe aktiv')}
         </div>
@@ -87,15 +93,21 @@
     </div>
   {:else if tab === 'regeln'}
     <section class="card list">
-      <div class="row"><span class="icb"><Icon name="target" /></span><span class="grow"><b>Tagesziel</b><small>Punkte für eine Person mit normalem Pensum</small></span><input class="inp num-in" type="number" min="1" max="50" bind:value={rules.tagesziel} /></div>
-      <div class="row"><span class="icb"><Icon name="user" /></span><span class="grow"><b>Mindestens pro Tag: Erwachsene</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_gross} /></div>
-      <div class="row"><span class="icb"><Icon name="baby" /></span><span class="grow"><b>Mindestens pro Tag: Kinder</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_klein} /></div>
+      <div class="row"><span class="icb"><Icon name="calendar-check" /></span><span class="grow"><b>Dienstplan</b><small>Jeden Morgen werden die Dienste fair verteilt. Aus: Jeder sucht sich Aufgaben bis zum Tagesziel aus.</small></span>{@render sw(rules.dienste, () => (rules.dienste = !rules.dienste), 'Dienstplan')}</div>
+      {#if rules.dienste}
+        <div class="row"><span class="icb"><Icon name="lock" /></span><span class="grow"><b>Erst Dienste, dann Extras</b><small>Kleinkram gibt es erst, wenn die eigenen Dienste erledigt sind</small></span>{@render sw(rules.extras_sperre, () => (rules.extras_sperre = !rules.extras_sperre), 'Extras erst nach den Diensten')}</div>
+        {#if S.settings.plan_start}<p class="hint" style="margin:0 0 6px">{S.settings.plan_start > G.calc.today ? 'Startet am' : 'Läuft seit dem'} {day(S.settings.plan_start)} Ob eine Aufgabe Dienst oder Extra ist, steht unter „Aufgaben“.</p>{/if}
+      {:else}
+        <div class="row"><span class="icb"><Icon name="target" /></span><span class="grow"><b>Tagesziel</b><small>Punkte für eine Person mit normalem Pensum</small></span><input class="inp num-in" type="number" min="1" max="50" bind:value={rules.tagesziel} /></div>
+        <div class="row"><span class="icb"><Icon name="user" /></span><span class="grow"><b>Mindestens pro Tag: Erwachsene</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_gross} /></div>
+        <div class="row"><span class="icb"><Icon name="baby" /></span><span class="grow"><b>Mindestens pro Tag: Kinder</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_klein} /></div>
+      {/if}
       <div class="row"><span class="icb"><Icon name="timer" /></span><span class="grow"><b>Mindestzeit zwischen den Fotos</b><small>in Minuten</small></span><input class="inp num-in" type="number" min="0" max="60" bind:value={rules.min_minutes} /></div>
       <div class="row"><span class="icb"><Icon name="image" /></span><span class="grow"><b>Fotos bleiben dauerhaft gespeichert</b><small>Ältere lassen sich unter „Fotos“ nachladen</small></span><Icon name="infinity" /></div>
       <div class="row"><span class="icb"><Icon name="database-backup" /></span><span class="grow"><b>Letzte Sicherung</b><small>{S.backup ? stamp(S.backup) + ' · läuft jede Nacht' : 'noch keine gelaufen'}</small></span>{#if G.backupLate}<span class="chip c-bad">überfällig</span>{:else if S.backup}<span class="chip c-ok"><Icon name="check" size={14} />in Ordnung</span>{/if}</div>
       <div class="row"><span class="icb"><Icon name="eye" /></span><span class="grow"><b>Punkte zählen erst nach dem Prüfen</b><small>Aus: Punkte gibt es sofort, Ablehnen nimmt sie wieder weg</small></span>{@render sw(rules.review_first, () => (rules.review_first = !rules.review_first), 'Punkte erst nach dem Prüfen')}</div>
       <div class="row"><span class="icb"><Icon name="cooking-pot" /></span><span class="grow"><b>Wer kocht, räumt auf</b><small>Knopf unter „Extra“</small></span>{@render sw(rules.koch_regel, () => (rules.koch_regel = !rules.koch_regel), 'Koch-Regel')}</div>
-      <div class="row"><span class="icb"><Icon name="bell" /></span><span class="grow"><b>Erinnerung ans Tagesziel</b><small>um 17 Uhr, wenn noch Punkte fehlen</small></span>{@render sw(rules.erinnerung, () => (rules.erinnerung = !rules.erinnerung), 'Erinnerung')}</div>
+      <div class="row"><span class="icb"><Icon name="bell" /></span><span class="grow"><b>Erinnerung um 17 Uhr</b><small>{rules.dienste ? 'wenn noch Dienste offen sind' : 'wenn noch Punkte zum Tagesziel fehlen'}</small></span>{@render sw(rules.erinnerung, () => (rules.erinnerung = !rules.erinnerung), 'Erinnerung')}</div>
     </section>
     <button class="btn wide" disabled={!dirty} onclick={saveRules}>Regeln speichern</button>
     <div class="sec-h"><h2>Bereiche</h2><span class="cnt">Icon antippen zum Ändern</span></div>

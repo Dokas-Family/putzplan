@@ -102,6 +102,33 @@ select cron.unschedule(jobid) from cron.job where jobname = 'putzplan-stuendlich
 
 Rückgängig machen ließe sich das mit den SQL-Dateien aus dem Branch `v1-archiv` (`supabase-setup.sql` und `supabase-update-4-push.sql` legen Rechte, Regeln und Wecker wieder an). Kostenlose Supabase-Projekte werden nach längerer Zeit ohne Nutzung pausiert; das Archiv auf dem eigenen Server ist davon unabhängig.
 
+## Dienstplan
+
+Seit dem 18.11.2026 verteilt der Server jeden Morgen um 4 Uhr die Dienste (`server/plan.js`). Ob eine Aufgabe ein Dienst oder ein Extra ist, steht bei der Aufgabe (beim Einführen: ab 3 Punkten Dienst, darunter Extra). Verteilt wird nach Pensum der Person (Gewicht Mo–Fr und Wochenende); wer eine Aufgabe oder einen Bereich in den letzten 7 Tagen oft gemacht hat, ist seltener wieder dran, und gleiche Aufgaben am selben Tag gehen an verschiedene Personen. Kinder bekommen nur Aufgaben mit „leicht“.
+
+- Um 7 Uhr bekommt jeder seine Dienste als Benachrichtigung, um 17 Uhr eine Erinnerung, wenn noch welche offen sind.
+- Was am Ende des Zeitraums nicht angefangen ist, gilt als verpasst und steht bei den Admins in der Übersicht.
+- Wer heute frei bekommt, den freien Tag als König wählt oder abwesend gemeldet wird, gibt seine Dienste ab; sie gehen an die anderen.
+- Admins können Dienste weitergeben und den Tag neu verteilen (Übersicht › Dienstplan heute).
+- Mit der Regel „Erst Dienste, dann Extras“ geht Kleinkram erst, wenn die eigenen Dienste erledigt sind.
+- Ausschalten unter Verwaltung › Regeln. Dann gilt wieder das Tagesziel in Punkten.
+
+## Videos und Claude
+
+Statt eines Fotos geht auch ein Video bis 15 Sekunden. Das letzte Bild wird zum Foto, das Video liegt daneben im Ordner `data/photos` und gehört mit in die Sicherung.
+
+Claude kann als System-Konto kommentieren und reagieren. Das geht nur aus dem Container heraus:
+
+```bash
+docker exec putzplan node server/claude.js neu 12
+```
+
+```bash
+docker exec -i putzplan node server/claude.js - < kommentare.json
+```
+
+Die Datei enthält eine Liste wie `[{ "entry_id": "…", "text": "…" }, { "entry_id": "…", "emoji": "👏" }]`.
+
 ## PIN vergessen
 
 Auf dem Anmeldeschirm gibt es unter dem Ziffernfeld „PIN vergessen?“. Das meldet sich bei den Admins: in der Übersicht steht dann „PIN vergessen: Name“, ein Tipp setzt die PIN zurück. Danach legt die Person beim nächsten Öffnen eine neue fest. Admins können eine PIN auch jederzeit über die Person zurücksetzen.
