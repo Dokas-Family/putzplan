@@ -23,8 +23,8 @@
   const day = k => k.split('-').reverse().slice(0, 2).join('.') + '.';
 
   // Regeln: erst lokal ändern, dann speichern
-  let rules = $state({ ...S.settings });
-  const dirty = $derived(['tagesziel', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung'].some(k => rules[k] !== S.settings[k]));
+  let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings });
+  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung'].some(k => rules[k] !== S.settings[k]));
   const saveRules = async () => (await tryDo(() => put('/settings', rules))) && toast('Regeln gespeichert');
 
   const stamp = iso => { const d = new Date(iso); return d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
@@ -88,6 +88,8 @@
   {:else if tab === 'regeln'}
     <section class="card list">
       <div class="row"><span class="icb"><Icon name="target" /></span><span class="grow"><b>Tagesziel</b><small>Punkte für eine Person mit normalem Pensum</small></span><input class="inp num-in" type="number" min="1" max="50" bind:value={rules.tagesziel} /></div>
+      <div class="row"><span class="icb"><Icon name="user" /></span><span class="grow"><b>Mindestens pro Tag: Erwachsene</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_gross} /></div>
+      <div class="row"><span class="icb"><Icon name="baby" /></span><span class="grow"><b>Mindestens pro Tag: Kinder</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_klein} /></div>
       <div class="row"><span class="icb"><Icon name="timer" /></span><span class="grow"><b>Mindestzeit zwischen den Fotos</b><small>in Minuten</small></span><input class="inp num-in" type="number" min="0" max="60" bind:value={rules.min_minutes} /></div>
       <div class="row"><span class="icb"><Icon name="image" /></span><span class="grow"><b>Fotos bleiben dauerhaft gespeichert</b><small>Ältere lassen sich unter „Fotos“ nachladen</small></span><Icon name="infinity" /></div>
       <div class="row"><span class="icb"><Icon name="database-backup" /></span><span class="grow"><b>Letzte Sicherung</b><small>{S.backup ? stamp(S.backup) + ' · läuft jede Nacht' : 'noch keine gelaufen'}</small></span>{#if G.backupLate}<span class="chip c-bad">überfällig</span>{:else if S.backup}<span class="chip c-ok"><Icon name="check" size={14} />in Ordnung</span>{/if}</div>

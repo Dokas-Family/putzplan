@@ -22,7 +22,7 @@ export const DAYS_SHORT = ['', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende' };
 export const ROLES = { admin: 'Admin', mitglied: 'Mitglied', kind: 'Kind' };
 export const REACTS = ['❤️', '👏', '😍', '🔥', '😂', '🤢', '🙈'];
-export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, review_first: false, erinnerung: true, rooms: {} };
+export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, rooms: {} };
 export const DEFAULT_RAIN = '🎉✨⭐🧽💪🌈';
 
 // Einträge ohne echte Aufgabe dahinter
@@ -67,7 +67,13 @@ export const entryKey = (taskId, period, slot) => `${taskId}|${period}|${slot ||
 // ---------- Personen ----------
 export const isAway = (m, d) => !!(m.away_from && m.away_to && dKey(d) >= m.away_from && dKey(d) <= m.away_to);
 export const weight = (m, d) => (isAway(m, d) ? 0 : +(isoDay(d) >= 6 ? m.w_weekend : m.w_weekday) || 0);
-export const dayGoal = (m, d, settings) => Math.round(weight(m, d) * (+settings.tagesziel || 10));
+/** Tagesziel: Pensum mal Tagesziel, aber nie unter dem Minimum (Erwachsene/Kinder). Wer frei hat (Gewicht 0), hat kein Ziel. */
+export function dayGoal(m, d, settings) {
+  const w = weight(m, d);
+  if (w <= 0) return 0;
+  const min = m.role === 'kind' ? +(settings.ziel_klein ?? 6) : +(settings.ziel_gross ?? 10);
+  return Math.max(Math.round(w * (+settings.tagesziel || 10)), min || 0);
+}
 export function personalTasksFor(st, m, d) {
   const out = [];
   for (const t of st.tasks) {

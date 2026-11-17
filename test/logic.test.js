@@ -57,6 +57,15 @@ test('Tagesziel, Serie und Punktekonto', () => {
   assert.equal(L.dayState(st, ix, mia, L.noon(today, -1), today), 'future');
 });
 
+test('Tagesziel hat ein Minimum für Erwachsene und Kinder', () => {
+  const mo = day(2026, 11, 16), st = { ...L.DEFAULT_SETTINGS, tagesziel: 10 };
+  const felix = { id: 'f', role: 'mitglied', w_weekday: 0.25, w_weekend: 1.6 }, lily = { id: 'l', role: 'kind', w_weekday: 0.3, w_weekend: 0.3 };
+  assert.equal(L.dayGoal(felix, mo, st), 10); // 0,25 × 10 wäre 3
+  assert.equal(L.dayGoal(lily, mo, st), 6);
+  assert.equal(L.dayGoal({ ...felix, w_weekday: 0 }, mo, st), 0); // frei bleibt frei
+  assert.equal(L.dayGoal(felix, mo, { ...st, ziel_gross: 12 }), 12);
+});
+
 test('Abwesenheit: kein Tagesziel, die Serie bleibt', () => {
   const today = day(2026, 11, 13);
   const m = { id: 'm', role: 'mitglied', active: true, w_weekday: 1, w_weekend: 1, away_from: '2026-11-11', away_to: '2026-11-12' };

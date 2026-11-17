@@ -390,6 +390,7 @@ on('PUT', '/api/settings', 'admin', ({ body, me }) => {
   for (const [k, v] of Object.entries(body.rooms && typeof body.rooms === 'object' ? body.rooms : s.rooms || {}).slice(0, 60)) rooms[str(k, 40)] = str(v, 30);
   const next = {
     min_minutes: int(body.min_minutes, 0, 60, s.min_minutes), tagesziel: int(body.tagesziel, 1, 50, s.tagesziel),
+    ziel_gross: int(body.ziel_gross, 0, 50, s.ziel_gross ?? 10), ziel_klein: int(body.ziel_klein, 0, 50, s.ziel_klein ?? 6),
     koch_regel: body.koch_regel ?? s.koch_regel ? true : false, review_first: body.review_first ?? s.review_first ? true : false, erinnerung: body.erinnerung ?? s.erinnerung ? true : false, rooms,
   };
   setMeta('settings', next);
