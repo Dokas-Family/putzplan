@@ -69,6 +69,8 @@ test('Tagesziel hat ein Minimum für Erwachsene und Kinder', () => {
   assert.equal(L.dayGoal(lily, mo, st), 6);
   assert.equal(L.dayGoal({ ...felix, w_weekday: 0 }, mo, st), 0); // frei bleibt frei
   assert.equal(L.dayGoal(felix, mo, { ...st, ziel_gross: 12 }), 12);
+  assert.equal(L.dayGoal({ ...felix, ziel_min: 8 }, mo, st), 8); // eigenes Minimum (Dorina)
+  assert.equal(L.dayGoal({ ...felix, w_weekday: 1.5 }, mo, { ...st, tagesziel: 15 }), 23); // darüber zählt das Pensum
 });
 
 test('Abwesenheit: kein Tagesziel, die Serie bleibt', () => {

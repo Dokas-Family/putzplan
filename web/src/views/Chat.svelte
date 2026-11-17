@@ -9,6 +9,7 @@
   import { open, toast } from '../lib/ui.svelte.js';
   import Camera from '../sheets/Camera.svelte';
   import ChatPhoto from '../sheets/ChatPhoto.svelte';
+  import { md } from '../lib/md.js';
 
   let mode = $state('mein'); // Admins: 'mein' | 'alle'
   let who = $state(null); // Admins: wessen Chat gerade angesehen wird (null = eigener)
@@ -65,8 +66,18 @@
   }
   function grow() { if (!box) return; box.style.height = 'auto'; box.style.height = Math.min(box.scrollHeight, 132) + 'px'; }
 
-  // Anzeige
-  const clean = t => String(t || '').replace(/\*\*(.+?)\*\*/g, '$1');
+  // Anzeige: Claudes Antworten mit Markdown (Personen mit Emoji, Fotos aus der App, Chat-Fotos nur aus diesem Chat)
+  const mdCtx = $derived.by(() => {
+    const own = new Set(msgs.map(m => m.photo).filter(Boolean));
+    return { people: new Map(S.members.map(m => [m.name.toLowerCase(), m])), photoOk: name => !name.startsWith('c-') || own.has(name) };
+  });
+  /** Klicks in Claudes Antworten: Foto groß ansehen, Code kopieren. */
+  function mdClick(e) {
+    const ph = e.target.closest?.('[data-photo]');
+    if (ph) return open(ChatPhoto, { name: ph.dataset.photo });
+    const cp = e.target.closest?.('[data-copy]');
+    if (cp) navigator.clipboard?.writeText(cp.closest('pre').querySelector('code').textContent).then(() => toast('Kopiert'), () => toast('Kopieren ging nicht'));
+  }
   const time = iso => new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   function dayLabel(iso) {
     const d = new Date(iso), t = new Date(), y = new Date(Date.now() - 864e5);
@@ -133,7 +144,8 @@
             {#if m.photo}
               <button class="cphoto" onclick={() => open(ChatPhoto, { name: m.photo })} aria-label="Foto groß ansehen"><img src="/photos/{m.photo}.t.jpg" alt="Foto" loading="lazy" /></button>
             {/if}
-            {#if m.text}<p>{clean(m.text)}</p>{/if}
+            {#if m.text && m.role === 'user'}<p>{m.text}</p>
+            {:else if m.text}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div class="md" onclick={mdClick}>{@html md(m.text, mdCtx)}</div>{/if}
             {#if m.actions?.length}
               <div class="cacts">{#each m.actions as a, j (j)}<span class="chip c-brand"><Icon name={a.icon || 'check'} size={13} />{a.text}</span>{/each}</div>
             {/if}

@@ -74,11 +74,15 @@ export const entryKey = (taskId, period, slot) => `${taskId}|${period}|${slot ||
 // ---------- Personen ----------
 export const isAway = (m, d) => !!(m.away_from && m.away_to && dKey(d) >= m.away_from && dKey(d) <= m.away_to);
 export const weight = (m, d) => (isAway(m, d) ? 0 : +(isoDay(d) >= 6 ? m.w_weekend : m.w_weekday) || 0);
-/** Tagesziel: Pensum mal Tagesziel, aber nie unter dem Minimum (Erwachsene/Kinder). Wer frei hat (Gewicht 0), hat kein Ziel. */
+/**
+ * Tagesziel: Pensum mal Tagesziel, aber nie unter dem Minimum (eigenes der Person, sonst Erwachsene/Kinder).
+ * Wer frei hat (Gewicht 0), hat kein Ziel.
+ */
 export function dayGoal(m, d, settings) {
   const w = weight(m, d);
   if (w <= 0) return 0;
-  const min = m.role === 'kind' ? +(settings.ziel_klein ?? 6) : +(settings.ziel_gross ?? 10);
+  const own = m.ziel_min != null && m.ziel_min !== '' ? +m.ziel_min : null;
+  const min = own ?? (m.role === 'kind' ? +(settings.ziel_klein ?? 6) : +(settings.ziel_gross ?? 10));
   return Math.max(Math.round(w * (+settings.tagesziel || 10)), min || 0);
 }
 /**

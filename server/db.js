@@ -46,6 +46,7 @@ if (!hasCol('entries', 'ai')) db.exec('alter table entries add column ai text');
 if (!hasCol('reactions', 'reply_to')) db.exec('alter table reactions add column reply_to text'); // Antwort auf einen Kommentar
 if (!hasCol('entries', 'pending')) db.exec("alter table entries add column pending text default '[]'"); // wer mithelfen möchte, aber noch nicht bestätigt ist
 if (!hasCol('entries', 'fuer')) db.exec('alter table entries add column fuer text'); // Dienst für jemand anderen übernommen: für wen
+if (!hasCol('members', 'ziel_min')) db.exec('alter table members add column ziel_min integer'); // eigenes Mindestziel pro Tag (sonst Standard)
 // Chat mit Claude (je Person ein Verlauf) und Anträge, die Claude für die Admins stellt
 db.exec(`
   create table if not exists chat (id text primary key, member_id text, role text, text text, photo text, actions text default '[]', cost real default 0, created_at text);
@@ -59,7 +60,7 @@ db.exec('create table if not exists tage (id text primary key, member_id text, d
 export { markDuties };
 
 const COLS = {
-  members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help'],
+  members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help', 'ziel_min'],
   tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
   entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai', 'pending', 'fuer'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at', 'reply_to'],

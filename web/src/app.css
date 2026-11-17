@@ -272,6 +272,42 @@ button.chip{border:0;color:inherit}
 .cm.me .cbub{background:var(--brand);border-color:var(--brand);color:#fff;border-radius:16px 16px 4px 16px}
 .cbub p{margin:0 0 4px;white-space:pre-wrap}
 .ctime{display:block;text-align:right;font-size:10.5px;margin-top:2px;opacity:.75}
+/* Claudes Antworten mit Markdown: Code, Tabellen, Diagramme, Fotos, Personen */
+.cm.claude:has(.mcode,.mtable,.mviz,.mimg){max-width:100%}
+.md{min-width:0}
+.md p{margin:0 0 6px;white-space:normal}
+.md .mh{font-weight:800;font-size:15.5px;margin:6px 0 4px}
+.md ul,.md ol{margin:2px 0 6px;padding-left:20px}
+.md li{margin:1px 0}
+.md blockquote{margin:4px 0 6px;padding:2px 0 2px 10px;border-left:3px solid var(--brand);color:var(--muted)}
+.md hr{border:0;border-top:2px solid var(--line);margin:8px 0}
+.md a{color:var(--brand-t);font-weight:700}
+.md code{font:13px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;background:var(--soft);border-radius:6px;padding:1px 5px}
+.md .ic{vertical-align:-3px;color:var(--brand-t)}
+.mcode{margin:4px 0 8px;background:#1b1830;color:#ece9ff;border-radius:12px;overflow:hidden}
+.mcode-h{display:flex;align-items:center;justify-content:space-between;padding:5px 8px 5px 12px;font:700 11.5px/1 system-ui,sans-serif;color:#b3a2ff;background:#26213f}
+.mcode-h button{color:#ece9ff;font-size:11.5px;font-weight:700;padding:4px 8px;border-radius:8px;background:#3a3360}
+.md .mcode code{display:block;background:none;color:inherit;padding:10px 12px;overflow-x:auto;white-space:pre;border-radius:0}
+.mscroll{overflow-x:auto;margin:4px 0 8px;border-radius:10px;border:2px solid var(--line);background:var(--card)}
+.mtable{border-collapse:collapse;width:100%;font-size:13.5px;overflow-wrap:normal}
+.mtable th,.mtable td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+.mtable th{background:var(--soft);font-weight:800;font-size:12.5px}
+.mtable tr:last-child td{border-bottom:0}
+.mchip{display:inline-flex;align-items:center;gap:3px;padding:0 7px;border-radius:99px;background:var(--soft);font-weight:700;font-size:.93em;white-space:nowrap}
+.mviz{margin:4px 0 8px;background:var(--card);border:2px solid var(--line);border-radius:12px;padding:9px 11px;min-width:min(270px,68vw)}
+.md .mviz-t{font-weight:800;font-size:13.5px;margin:0 0 6px}
+.mbar{display:grid;grid-template-columns:minmax(64px,auto) 1fr auto;align-items:center;gap:8px;margin:5px 0;font-size:13px}
+.mbar-l{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+.mbar-t{height:10px;border-radius:99px;background:var(--soft);overflow:hidden}
+.mbar-t i{display:block;height:100%;border-radius:99px;background:var(--brand)}
+.mbar-t.ok i{background:var(--ok)}
+.mbar-v{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px}
+.mtile{background:var(--soft);border-radius:10px;padding:8px 10px}
+.mtile b{display:block;font-size:17px;font-weight:800}
+.mtile small{display:flex;align-items:center;gap:4px}
+.mimg{display:inline-block;margin:4px 6px 4px 0;border-radius:12px;overflow:hidden;vertical-align:top}
+.mimg img{display:block;width:150px;max-width:100%;height:auto}
 .cm.me .ctime{color:#fff}
 .cacts{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 2px}
 .cacts .chip{background:var(--card);color:var(--ct);white-space:normal}

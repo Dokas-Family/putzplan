@@ -80,11 +80,11 @@ export const emitRaw = (memberId, change) => send(change, false, memberId);
 /** Eine fertige Änderung an alle (z. B. festgeschriebene Tagesregeln). */
 export const emitAll = change => send(change, false);
 /** Den aktuellen Stand einer Zeile an die richtigen Geräte schicken (gibt es sie nicht mehr: als gelöscht). */
-export function emitRow(t, id) {
+export function emitRow(t, id, old = null) {
   const r = row(t, id);
-  if (t === 'log') return r && send({ t, row: out(t, r) }, true);
+  if (t === 'log') return send(r ? { t, row: out(t, r) } : { t, del: id }, true);
   if (t === 'tage') return send(r ? { t, row: out(t, r) } : { t, del: id }, false);
-  if (t === 'chat' || t === 'antraege') return r && send({ t, row: out(t, r) }, false, r.member_id);
+  if (t === 'chat' || t === 'antraege') return (r || old) && send(r ? { t, row: out(t, r) } : { t, del: id }, false, (r || old).member_id);
   if (!['entries', 'reactions', 'tasks', 'members'].includes(t)) return;
   send(r ? { t, row: out(t, r) } : { t, del: id }, false);
 }

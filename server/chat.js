@@ -6,14 +6,15 @@
 // Admins sehen alle Chats. Pro Person (außer Admins) höchstens 10 € im Monat; was etwas kostet, sehen nur Admins.
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { DatabaseSync, constants as SQ } from 'node:sqlite';
 import { db, DATA, q, row, out, insert, patch, getMeta, setMeta, settings, logicState, tageMap, savePhoto, photoFile, delPhoto } from './db.js';
 import { on, match, Fail, now, emit, emitTo, emitRaw, emitRow } from './core.js';
 import { notify } from './push.js';
 import { freeUp } from './plan.js';
 import { PERSONA_BASE, frames } from './reviewer.js';
+import { ICONS } from '../web/src/lib/md.js';
 import * as L from '../shared/logic.js';
 
 const MODEL = process.env.CLAUDE_CHAT_MODEL || 'claude-opus-5-5';
@@ -118,7 +119,7 @@ function lage(me) {
     const days = [1, 2, 3, 4, 5, 6].map(i => { const x = L.noon(d, i); return `${dayLabel(x)} ${STATE_TEXT[L.dayState(st, ix, m, x, d)] || '-'}`; });
     bits.push(`Serie ${L.streak(ix, m, st, d)} Tage (heute ${STATE_TEXT[L.dayState(st, ix, m, d, d)]}; davor ${days.join(', ')})`);
     if (L.isAway(m, d)) bits.push('gerade abwesend');
-    return `- ${m.name} (${ROLE[m.role] || 'Erwachsen'}): ${bits.join(', ')}`;
+    return `- ${m.emoji || ''} ${m.name} (${ROLE[m.role] || 'Erwachsen'}): ${bits.join(', ')}`;
   });
   const mine = st.entries.filter(e => L.isOpen(e) && L.involved(e, me.id));
   const others = st.entries.filter(e => e.status === 'todo' && L.isDuty(e) && e.member_id !== me.id && L.dutyDay(e) === k);
@@ -140,7 +141,7 @@ function lage(me) {
 // ---------- Datenbank: lesen und reparieren ----------
 const SECRET_META = ['vapid', 'code', 'v1_door'];
 const NO_READ = new Set(['sessions', 'push_subs']);
-const WRITE_ADMIN = new Set(['entries', 'reactions', 'tasks', 'members', 'tage', 'antraege']);
+const WRITE_ADMIN = new Set(['entries', 'reactions', 'tasks', 'members', 'tage', 'antraege', 'chat', 'log']);
 const WRITE_OTHERS = new Set(['entries', 'reactions', 'tage']);
 const READ_OK = new Set([SQ.SQLITE_SELECT, SQ.SQLITE_FUNCTION, SQ.SQLITE_RECURSIVE]);
 /** Lesen: alles außer Sitzungen, Push-Anmeldungen, PIN-Hashes und Schlüsseln; fremde Chats nur im Chat mit Admins. */
@@ -232,9 +233,42 @@ function sqlTool(me, a, turn) {
   for (const c of diff) count[`${c.t} ${c.kind}`] = (count[`${c.t} ${c.kind}`] || 0) + 1;
   const summary = Object.entries(count).map(([k, n]) => `${n}× ${k}`).join(', ');
   claudeLog(`hat direkt in der Datenbank geändert: ${zweck} (${summary})${chatWith(me)}`, diff.map(c => (c.kind === 'neu' ? { t: c.t, id: c.id, del: true } : { t: c.t, id: c.id, restore: c.old })));
-  for (const c of diff) emitRow(c.t, c.id);
+  for (const c of diff) emitRow(c.t, c.id, c.old);
   turn.actions.push({ icon: 'database', text: zweck });
   return `Ausgeführt: ${summary}. Steht im Protokoll und lässt sich dort zurücknehmen.`;
+}
+
+// ---------- Quellcode lesen ----------
+// Die App ist Felix' eigenes Projekt (öffentliches Repo). Lesbar ist nur, was hier aufgezählt ist, nie data/ oder .env.
+const ROOT = process.cwd(), CODE_DIRS = ['server', 'shared', 'web/src', 'test', 'scripts'];
+const CODE_FILES = ['README.md', 'Dockerfile', 'docker-compose.yml', 'package.json', 'vite.config.js'];
+function codeFiles() {
+  const out = [], walk = dir => {
+    if (!existsSync(dir)) return;
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(js|mjs|svelte|css|html|json|md|sh|yml)$/.test(e.name)) out.push(relative(ROOT, p).replace(/\\/g, '/'));
+    }
+  };
+  for (const d of CODE_DIRS) walk(join(ROOT, d));
+  for (const f of CODE_FILES) if (existsSync(join(ROOT, f))) out.push(f);
+  return out.sort();
+}
+function sourceTool(a) {
+  const files = codeFiles();
+  if (a.suche) {
+    const s = str(a.suche, 120).toLowerCase(), hits = [];
+    for (const f of files) {
+      readFileSync(join(ROOT, f), 'utf8').split('\n').forEach((l, i) => { if (hits.length < 80 && l.toLowerCase().includes(s)) hits.push(`${f}:${i + 1}: ${l.trim().slice(0, 200)}`); });
+    }
+    return hits.length ? hits.join('\n') + (hits.length >= 80 ? '\n(gekürzt, genauer suchen)' : '') : 'Nichts gefunden.';
+  }
+  if (!a.pfad) return `Dateien (Pfad: Zeilen):\n${files.map(f => `${f}: ${readFileSync(join(ROOT, f), 'utf8').split('\n').length}`).join('\n')}`;
+  const f = files.find(x => x === String(a.pfad).replace(/^\.?\//, ''));
+  if (!f) throw new Fail(404, 'Diese Datei gibt es nicht (oder sie ist nicht lesbar). Ohne pfad kommt die Liste.');
+  const lines = readFileSync(join(ROOT, f), 'utf8').split('\n'), von = Math.max(1, +a.von || 1), bis = Math.min(lines.length, +a.bis || von + 799);
+  return `${f}, Zeilen ${von} bis ${bis} von ${lines.length}:\n${lines.slice(von - 1, bis).map((l, i) => `${von + i}\t${l}`).join('\n')}`;
 }
 
 // ---------- Was Claude im Chat tun kann ----------
@@ -258,6 +292,9 @@ einstellungen(key, value) nur lesen, value ist JSON (z. B. key 'settings' mit de
 Hinweise: Zeiten (created_at, before_at, after_at, at) sind ISO in UTC, Deutschland ist UTC+1. status: todo, started, done, missed, rejected (rejected heißt auch: entfernt, so lässt sich alles zurückholen; lieber das als DELETE). task_id: Kennung der Aufgabe oder adhoc, bonus, warn, frei, redeem. period: JJJJ-MM-TT bei täglichen Aufgaben und bei frei (der freie Tag), JJJJ-Www bei wöchentlichen, JJJJ-MM bei monatlichen. helpers und pending: JSON-Liste von Personen-Kennungen. Punkte zählen für den Tag von after_at. Ein Dienst ist ein Eintrag mit created_by 'plan', note 'koch', fuer oder von jemand anderem eingetragen. tage: festgeschriebene Regeln je Person und Tag (id 'Personenkennung|JJJJ-MM-TT', goal = Tagesziel in Punkten, 0 heißt frei; plan = 1, wenn an dem Tag der Dienstplan galt). Die Serie rechnet jeden Tag nach seiner Zeile in tage. Fotospalten nicht ändern.`, {
     sql: S('Eine SQL-Anweisung'), zweck: S('Wofür, in ein paar Worten (steht im Protokoll und im Chat), z. B. „Doppelten Eintrag von Alex entfernt“'),
   }, ['sql', 'zweck']),
+  T('quellcode', 'Den Quellcode der App lesen (nur lesen), um zu verstehen, wie etwas genau funktioniert oder warum etwas passiert ist. Ohne Angaben: Liste aller Dateien. Mit suche: Fundstellen im ganzen Code. Mit pfad: die Datei mit Zeilennummern (höchstens 800 Zeilen pro Aufruf, mit von/bis weiterlesen). Wichtig: shared/logic.js (Punkte, Serie, Tagesziel), server/api.js (alle Aktionen), server/plan.js (Dienstplan), server/chat.js (du selbst).', {
+    pfad: S('Datei, z. B. shared/logic.js'), suche: S('Text, der im Code vorkommen soll'), von: N('Ab Zeile'), bis: N('Bis Zeile'),
+  }),
   // Für die schreibende Person
   T('dienst_uebernehmen', 'Einen noch nicht angefangenen Dienst einer anderen Person für die schreibende Person übernehmen. Sie bekommt die Punkte und 1 Bonuspunkt, die andere Person hat den Dienst dann nicht mehr.', { id: S('Kennung des Dienstes') }, ['id']),
   T('aufgabe_eintragen', 'Etwas auf eine Liste setzen. art „extra“: eigene Extra-Aufgabe der schreibenden Person. art „koch“: „Wer kocht, räumt auf“ für die Person, die gekocht hat. art „zuweisen“: einer Person eine Aufgabe mit Punkten geben.', {
@@ -324,6 +361,7 @@ async function look(id) {
     e.ai?.grund ? `Claude beim Ansehen: ${e.ai.grund}` : '',
     e.pending.length ? `Möchten mithelfen: ${e.pending.map(nameOf).join(', ')}` : '',
     thread.length ? `Kommentare und Reaktionen:\n${thread.map(r => `- ${nameOf(r.member_id)}: ${r.text || r.emoji}`).join('\n')}` : 'Keine Kommentare.',
+    e.before_photo || e.after_photo ? `Zum Zeigen im Chat: ${[e.before_photo && `![Vorher](foto:${e.before_photo})`, e.after_photo && `![Nachher](foto:${e.after_photo})`].filter(Boolean).join(' ')}` : '',
   ].filter(Boolean).join('\n');
   const pics = [];
   for (const [k, label] of [['before', 'Vorher'], ['after', 'Nachher']]) {
@@ -476,6 +514,7 @@ async function runTool(me, name, a, turn) {
     case 'aufgaben_liste': return tasksList();
     case 'protokoll': return protocol(a);
     case 'datenbank': return sqlTool(me, a, turn);
+    case 'quellcode': return sourceTool(a);
     case 'dienst_uebernehmen': {
       const e = out('entries', row('entries', str(a.id, 64)));
       call(me, 'POST', `/api/entries/${e?.id || 'x'}/takeover`);
@@ -574,13 +613,25 @@ const SYSTEM_PROMPT = `${PERSONA_BASE}
 Jetzt bist du im Chat der App (Reiter „Claude“). Hier kann dir jede Person aus der Familie schreiben: Fragen zur App, zu Punkten und Diensten, Nachweise für Extra-Arbeit, Bitten um Änderungen, Fehler, die repariert werden sollen. Du bist der Support der Familie und triffst selbst Entscheidungen.
 
 So arbeitest du im Chat:
-- Kurz und klar wie im Messenger: meist ein bis vier Sätze. Keine Tabellen, keine Überschriften, kein Fettdruck. Eine kurze Liste nur, wenn es wirklich eine Liste ist.
-- Zu jeder Nachricht bekommst du die aktuelle Lage (Uhrzeit, wer schreibt, wer heute was hat, Punkte, Tagesziel, Serie mit den letzten Tagen, offene Dienste mit Kennung). Für Details hast du Werkzeuge bis hin zur Datenbank. Schau nach, bevor du etwas behauptest, und rechne nach, wenn Zahlen nicht zusammenpassen. Erfinde nichts.
+- Kurz und klar wie im Messenger: meist ein bis vier Sätze.
+- Zu jeder Nachricht bekommst du die aktuelle Lage (Uhrzeit, wer schreibt, wer heute was hat, Punkte, Tagesziel, Serie mit den letzten Tagen, offene Dienste mit Kennung). Für Details hast du Werkzeuge bis hin zur Datenbank und zum Quellcode der App. Schau nach, bevor du etwas behauptest, und rechne nach, wenn Zahlen nicht zusammenpassen. Erfinde nichts. Verstehst du nicht, warum die App etwas tut, lies im Quellcode nach.
+
+So sieht deine Antwort aus (der Chat zeigt Markdown an):
+- **fett**, *kursiv*, Listen, Zitate, Links, Tabellen (| Name | Punkte |) und Codeblöcke mit Sprache (\`\`\`python) gehen. Setz das ein, wenn es wirklich hilft, nicht bei jeder Antwort.
+- @Name zeigt eine Person aus der Familie mit ihrem Emoji, zum Beispiel @Mia.
+- Symbole der App mit :name:, zum Beispiel :flame: :trophy: :crown: :star: :calendar-check: :trash-2: :tree-palm:. Erlaubt sind nur diese: ${[...ICONS].join(' ')}.
+- Fotos aus der App zeigst du mit ![Text](foto:NAME). Die Namen stehen bei eintrag_ansehen oder in before_photo/after_photo. Chat-Fotos (Name beginnt mit c-) nur aus diesem Chat.
+- Kleine Diagramme als Codeblock, je Zeile „Bezeichnung: Wert“, eine Zeile „Titel: …“ geht dazu:
+  \`\`\`balken  (Vergleich, z. B. „@Mia: 45“, „@Felix: 21 P“)
+  \`\`\`fortschritt  (Stand zum Ziel, z. B. „@Iris: 3/10“)
+  \`\`\`kacheln  (wenige Kennzahlen, z. B. „:flame: Serie: 6 Tage“)
+  Diagramme und Tabellen nimmst du, wenn jemand nach Zahlen, Vergleichen oder einer Übersicht fragt.
 - Tu, worum die Person bittet, wenn es klar ist. Was andere trifft (jemandem einen Dienst geben, etwas entfernen), nur wenn es eindeutig gewollt oder ein klarer Fehler ist. Ist etwas unklar, frag kurz nach.
 - Sag nach einer Aktion in einem Satz, was du gemacht hast. Kennungen nennst du nicht, die versteht niemand.
 
 Deine Rechte:
-- Du hast volle Rechte, mehr als ein Admin: alle Werkzeuge der App und die Datenbank zum Lesen und Schreiben (datenbank). Im Chat mit Admins (Dorina und Felix) tust du, was sie wollen, auch Belohnungen, Abmahnungen, freie Tage, Regeln ändern und die App neu starten.
+- Du hast volle Rechte, mehr als ein Admin: alle Werkzeuge der App, die Datenbank zum Lesen und Schreiben (datenbank) und den Quellcode zum Lesen (quellcode). Im Chat mit Admins (Dorina und Felix) tust du, was sie wollen, auch Belohnungen, Abmahnungen, freie Tage, Regeln ändern, Chat-Nachrichten oder Protokollzeilen löschen und die App neu starten. Gesperrt sind nur Sitzungen, Push-Anmeldungen, PIN-Hashes und Schlüssel, damit niemand über den Chat fremde Konten übernehmen kann.
+- Den Code der App ändern kannst du nicht. Wünscht sich jemand eine neue Funktion, sag, dass Felix sie in Claude Code einbauen kann.
 - Alles, was du änderst, steht im Protokoll und lässt sich dort zurücknehmen. Ändere trotzdem nur, was nötig ist, und prüf vorher mit SELECT, was betroffen ist. Lieber status 'rejected' als löschen.
 - Repariert die App etwas falsch oder hat sie einen Fehler (falscher Tag, doppelter Eintrag, Serie durch einen Fehler kaputt, aus Versehen abgehakt, falsch zugeordnet), reparierst du es selbst, egal wer schreibt. Erst nachsehen und verstehen, dann reparieren und kurz erklären.
 
@@ -656,6 +707,7 @@ async function reply(memberId) {
       else if (/^!antrag/.test(last)) text = antrag(me, { art: 'bonus', person: me.id, punkte: 4, grund: 'Probe-Antrag' }, turn);
       else if (/^!sql /.test(last)) text = String(sqlTool(me, { sql: last.slice(5), zweck: 'Probe' }, turn));
       else if (/^!melden/.test(last)) text = melden(me, { person: me.id, was: 'Probe-Meldung' }, turn);
+      else if (/^!code/.test(last)) text = sourceTool({ pfad: last.slice(5).trim() || undefined });
       else if (/^!frei /.test(last)) text = String(await runTool(me, 'belohnen', { art: 'frei', person: me.id, tag: last.slice(6).trim() }, turn));
       else text = `Probe-Antwort an ${me.name}`;
     } catch (e) { text = e.message; }

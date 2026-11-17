@@ -513,6 +513,7 @@ on('PUT', '/api/members/:id', 'admin', ({ p, body, me }) => {
     w_weekday: num(body.w_weekday, 0, 3, 1), w_weekend: num(body.w_weekend, 0, 3, 1), waschtag: int(body.waschtag, 1, 7, null),
     active: body.active !== false, titel: ['k', 'q'].includes(body.titel) ? body.titel : null,
     away_from: isDate(body.away_from) && isDate(body.away_to) ? body.away_from : null, away_to: isDate(body.away_from) && isDate(body.away_to) ? body.away_to : null,
+    ziel_min: int(body.ziel_min, 0, 50, null),
   };
   if (!f.name) throw new Fail(400, 'Der Name fehlt');
   if (old?.role === 'admin' && (f.role !== 'admin' || !f.active) && !q.get("select id from members where role = 'admin' and active = 1 and id <> ?", p.id)) throw new Fail(400, 'Mindestens eine Person muss Admin bleiben');

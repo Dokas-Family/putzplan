@@ -559,6 +559,20 @@ test('Claude mit vollen Rechten: Datenbank lesen und reparieren, Schutz gegen Mo
   const before = (await mia.get('/api/chat')).messages.length;
   assert.equal((await admin.post(`/api/antraege/${m.id}/decide`, { accept: true })).antrag.status, 'erledigt');
   assert.equal((await mia.get('/api/chat')).messages.length, before);
+  // Quellcode lesen: ja, aber nur den Code, nie Daten oder Geheimes
+  r = await mia.post('/api/chat', { text: '!code shared/logic.js' });
+  assert.match(said(r), /export function streak/);
+  for (const p of ['data/putzplan.db', '../.env', '.env', '/etc/passwd']) {
+    r = await mia.post('/api/chat', { text: `!code ${p}` });
+    assert.match(said(r), /gibt es nicht/, p);
+  }
+  // Chat-Nachrichten löschen: im Chat mit Admins ja (kommt sofort weg), sonst nicht
+  r = await mia.post('/api/chat', { text: `!sql delete from chat where member_id = '${MIA}'` });
+  assert.match(said(r), /Geht nicht/);
+  const hi = await admin.post('/api/chat', { text: 'Bitte löschen' });
+  r = await admin.post('/api/chat', { text: `!sql delete from chat where id = '${hi.id}'` });
+  assert.ok(r.changes.some(c => c.t === 'chat' && c.del === hi.id));
+  assert.ok(!(await admin.get('/api/chat')).messages.some(x => x.id === hi.id));
 });
 
 test('Tagesregeln werden festgeschrieben und kommen mit dem Zustand', async () => {

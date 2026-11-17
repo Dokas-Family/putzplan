@@ -19,6 +19,11 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY shared ./shared
+# Quelltext der App, damit Claude im Chat nachlesen kann, wie etwas funktioniert (nur lesen)
+COPY web/src ./web/src
+COPY test ./test
+COPY scripts ./scripts
+COPY README.md Dockerfile docker-compose.yml vite.config.js ./
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /data && chown node:node /data
 USER node

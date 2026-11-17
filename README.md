@@ -133,6 +133,8 @@ Mit `ANTHROPIC_API_KEY` sieht sich Claude neue Einträge selbst an. Aus Videos s
 
 ### Serie und festgeschriebene Tage
 
+Tagesziel ohne Dienstplan: Pensum × Tagesziel, aber mindestens das Minimum (Erwachsene, Kinder, oder ein eigenes Mindestziel der Person unter Verwaltung › Familie).
+
 Kurz nach Mitternacht schreibt der Server für jede Person die Regeln des neuen Tages fest (Tabelle `tage`: Tagesziel und ob der Dienstplan gilt). Die Serie rechnet jeden Tag nach seinen eigenen Regeln. Ein neues Pensum, ein anderes Tagesziel oder der Start des Dienstplans gelten damit ab dem nächsten Tag und rechnen nie die Vergangenheit um. Freie Tage und Tage ohne Dienste brechen die Serie nicht ab.
 
 ### Chat mit Claude
@@ -143,6 +145,9 @@ Im Reiter „Claude“ kann jede Person mit Claude schreiben (Opus 5.5, Aufwand 
 - Im Chat mit allen anderen gilt der Schutz gegen Mogeln: Reparieren ja (falscher Tag, Doppeltes, kaputte Serie), aber nichts, was jemandem mehr als 3 Punkte bringt. Die Datenbank prüft das selbst und rollt sonst zurück. Schreiben dort nur in `entries`, `reactions`, `tage`, fremde Chats lesen geht nicht.
 - Selbst vergibt Claude dort nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag. Alles andere wird ein Antrag. Die Admins sehen ihn in der Übersicht unter „Von Claude“ und nehmen an oder lehnen ab.
 - Mogelversuche meldet Claude den Admins (ebenfalls unter „Von Claude“). Die gemeldete Person sieht die Meldung nicht.
+- Claude kann den Quellcode lesen (Werkzeug `quellcode`, nur lesen, nie `data/` oder `.env`). Deshalb liegen `web/src`, `test`, `scripts` und die README auch im Image.
+- Antworten zeigt die App als Markdown (`web/src/lib/md.js`, ohne Bibliothek, maskiert alles): Tabellen, Codeblöcke mit Kopieren, `@Name` mit Emoji, App-Symbole `:flame:`, Fotos `![Text](foto:NAME)` und Diagramme als Codeblock `balken`, `fortschritt`, `kacheln`.
+- Im Chat mit Admins darf Claude auch Chat-Nachrichten und Protokollzeilen ändern oder löschen.
 - Offene Dienste anderer lassen sich übernehmen (im Chat oder unter „Wer hat heute was?“): Punkte plus 1 Bonuspunkt.
 - Admins sehen unter „Alle Chats“ jeden Verlauf und was er diesen Monat gekostet hat. Alle anderen sehen keine Beträge.
 - Grenze: 10 € API-Kosten pro Person und Monat, Admins ohne Grenze (`CHAT_LIMIT_EUR` in der `.env` ändert das).

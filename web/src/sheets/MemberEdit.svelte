@@ -17,7 +17,7 @@
   async function save() {
     if (!f.name.trim()) return toast('Der Name fehlt');
     if (away && (!f.away_from || !f.away_to || f.away_to < f.away_from)) return toast('Bitte Von und Bis für die Abwesenheit eintragen');
-    const body = { ...f, away_from: away ? f.away_from : null, away_to: away ? f.away_to : null };
+    const body = { ...f, away_from: away ? f.away_from : null, away_to: away ? f.away_to : null, ziel_min: f.ziel_min === '' || f.ziel_min == null ? null : +f.ziel_min };
     if (await tryDo(() => put('/members/' + (member?.id || crypto.randomUUID()), body))) { toast('Gespeichert'); close(); }
   }
   async function remove() {
@@ -37,7 +37,9 @@
   <div class="grow"><label class="f" for="m-wd">Pensum Mo–Fr</label><select id="m-wd" class="inp" bind:value={f.w_weekday}>{#each loads(f.w_weekday) as [v, l] (v)}<option value={v}>{l}</option>{/each}</select></div>
   <div class="grow"><label class="f" for="m-we">Pensum Wochenende</label><select id="m-we" class="inp" bind:value={f.w_weekend}>{#each loads(f.w_weekend) as [v, l] (v)}<option value={v}>{l}</option>{/each}</select></div>
 </div>
-<p class="hint" style="margin-top:6px">Für das Tagesziel gilt ein neues Pensum ab morgen, für den Dienstplan ab der nächsten Verteilung.</p>
+<label class="f" for="m-min">Eigenes Mindestziel pro Tag (Punkte)</label>
+<input id="m-min" class="inp" type="number" min="0" max="50" inputmode="numeric" placeholder={`Standard: ${f.role === 'kind' ? (S.settings.ziel_klein ?? 6) : (S.settings.ziel_gross ?? 10)}`} bind:value={f.ziel_min} />
+<p class="hint" style="margin-top:6px">Leer lassen für den Standard. Für das Tagesziel gelten neues Pensum und Mindestziel ab morgen, für den Dienstplan ab der nächsten Verteilung.</p>
 <div class="row" style="gap:12px">
   <div class="grow"><label class="f" for="m-wt">Waschtag</label><select id="m-wt" class="inp" bind:value={f.waschtag}><option value={null}>kein Waschtag</option>{#each [1, 2, 3, 4, 5, 6, 7] as i (i)}<option value={i}>{DAYS[i]}</option>{/each}</select></div>
   <div class="grow"><label class="f" for="m-titel">Titel als Wochensieger</label><select id="m-titel" class="inp" bind:value={f.titel}><option value={null}>Majestät</option><option value="k">König</option><option value="q">Königin</option></select></div>
