@@ -26,6 +26,11 @@ if (cmd === 'neu') {
     const j = await r.json().catch(() => ({}));
     console.log(r.status, it.entry_id, it.text ? it.text.slice(0, 50) : it.emoji, j.error || '');
   }
+} else if (cmd === 'probe') {
+  // Probelauf mit der echten API: zeigt, was Claude sagen würde, postet nichts
+  const { probe } = await import('./reviewer.js');
+  console.log(JSON.stringify(await probe(arg), null, 2));
+  process.exit(0);
 } else {
-  console.log('Aufruf: node server/claude.js neu [Anzahl] | node server/claude.js - < kommentare.json');
+  console.log('Aufruf: node server/claude.js neu [Anzahl] | node server/claude.js - < kommentare.json | node server/claude.js probe <eintrag>');
 }

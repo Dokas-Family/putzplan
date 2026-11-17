@@ -201,6 +201,15 @@ export async function review(id, { force = false } = {}) {
   return ai;
 }
 
+/** Probelauf aus der Konsole: was Claude zu einem Eintrag sagen würde, ohne etwas zu posten oder zu ändern. */
+export async function probe(id) {
+  const e = out('entries', row('entries', id));
+  if (!e || !photos(e).length) throw new Error('Eintrag ohne Vorher- und Nachher-Foto');
+  const t0 = Date.now();
+  const r = await ask(`${PERSONA}\n\n${REVIEW}\n\n${EXAMPLES}`, [{ type: 'text', text: context(e) }, ...photos(e), { type: 'text', text: 'Schreib jetzt deinen Kommentar und dein Urteil.' }], REVIEW_SCHEMA);
+  return { ...r, sekunden: Math.round((Date.now() - t0) / 1000) };
+}
+
 // ---------- In den Kommentaren antworten ----------
 /** Auf einen Kommentar antworten. optional: Claude wurde nicht direkt angesprochen und darf auch schweigen. */
 export async function answer(cid, { optional = false } = {}) {
