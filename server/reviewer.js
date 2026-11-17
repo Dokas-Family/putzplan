@@ -148,6 +148,7 @@ async function ask(system, content, schema) {
   return text ? JSON.parse(text) : null;
 }
 
+const saidSomething = id => !!q.get("select 1 as x from reactions where entry_id = ? and member_id = 'claude' and text is not null and reply_to is null", id);
 /** Zähler pro Tag, damit es nie ausufert. */
 function countToday() { const c = getMeta('claude_count'); return c?.day === L.dKey(new Date()) ? c.n : 0; }
 const bump = () => setMeta('claude_count', { day: L.dKey(new Date()), n: countToday() + 1 });
@@ -166,6 +167,7 @@ export async function review(id, { force = false } = {}) {
   let e = out('entries', row('entries', id));
   if (!reviewerReady() || !e || e.status !== 'done' || L.ADMIN_KINDS.has(e.task_id) || !photos(e).length) return null;
   if ((e.ai?.at && !force) || countToday() >= PER_DAY) return null;
+  if (!force && saidSomething(e.id)) return null; // schon kommentiert (z. B. von Hand nachgeholt): nicht doppelt
   bump();
   let r;
   try {
@@ -257,6 +259,6 @@ export function sweep() {
   if (!reviewerOn()) return;
   const since = new Date(Date.now() - 36 * 3600e3).toISOString();
   const todo = q.all("select * from entries where status = 'done' and after_at >= ? and before_photo is not null and after_photo is not null order by after_at", since)
-    .map(r => out('entries', r)).filter(e => !L.ADMIN_KINDS.has(e.task_id) && !e.ai?.at && (e.ai?.tries || 0) < 3 && !timers.has(e.id));
+    .map(r => out('entries', r)).filter(e => !L.ADMIN_KINDS.has(e.task_id) && !e.ai?.at && (e.ai?.tries || 0) < 3 && !timers.has(e.id) && !saidSomething(e.id));
   for (const e of todo.slice(0, 15)) run(() => review(e.id));
 }
