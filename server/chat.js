@@ -126,7 +126,7 @@ function lage(me) {
   const asks = q.all(`select * from antraege where (member_id = ? or by = ?) and created_at >= ?${isAdmin(me) ? '' : " and kind <> 'meldung'"} order by created_at desc limit 8`, me.id, me.id, new Date(Date.now() - 14 * 864e5).toISOString());
   const infos = String(getMeta('claude_infos') || '').trim();
   return [
-    `Jetzt: ${d.toLocaleString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })} Uhr. ${plan ? 'Der Dienstplan läuft.' : 'Ohne Dienstplan (Tagesziel in Punkten, mit Punktekonto zum Einlösen).'}${st.settings.plan_start && st.settings.plan_start > k ? ` Der Dienstplan startet am ${dayLabel(L.fromKey(st.settings.plan_start))}.` : ''}`,
+    `Jetzt: ${d.toLocaleString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} Uhr (heute ist ${k}). ${plan ? 'Der Dienstplan läuft.' : 'Ohne Dienstplan (Tagesziel in Punkten, mit Punktekonto zum Einlösen).'}${st.settings.plan_start && st.settings.plan_start > k ? ` Der Dienstplan startet am ${dayLabel(L.fromKey(st.settings.plan_start))}.` : ''}`,
     `Es schreibt: ${me.name} (${ROLE[me.role] || 'Erwachsen'}${isAdmin(me) ? ', Admin: alles, was sie oder er will' : ', kein Admin: es gilt der Schutz gegen Mogeln'}).`,
     infos ? `Was die Admins über die Familie hinterlegt haben:\n${infos}` : '',
     `Die Familie heute:\n${people.join('\n')}`,
