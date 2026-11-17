@@ -23,6 +23,7 @@ class Store {
   update = $state(false); // der Server läuft inzwischen mit einem neueren Stand
   backup = $state.raw(null); // Zeitpunkt der letzten Sicherung (nur für Admins)
   claude = $state(false); // ist auf dem Server ein Claude-Schlüssel eingetragen? (nur für Admins)
+  claudeInfos = $state(''); // was Claude über die Familie wissen soll (nur für Admins)
   preselect = null; // Person, mit der das Gerät in der alten App angemeldet war
 }
 export const S = new Store();
@@ -122,6 +123,7 @@ async function loadState() {
   if (!S.older.length) S.olderMore = !!st.older;
   S.backup = st.backup ?? null;
   S.claude = !!st.claude;
+  S.claudeInfos = st.claude_infos || '';
   // Nach einem Update läuft im Handy noch der alte Stand der App: Hinweis zum Neuladen zeigen
   if (!S.version) S.version = st.version || '';
   else if (st.version && st.version !== S.version) S.update = true;

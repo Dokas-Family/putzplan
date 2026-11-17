@@ -23,7 +23,7 @@
   <div class="hrow"><span class="tile c-info"><Icon name="camera" /></span><p><b>Vorher, putzen, Nachher</b>Start macht das Vorher-Foto, Fertig das Nachher-Foto. Statt Foto geht auch ein kurzes Video. Mit „Mithelfen“ teilt ihr euch die Punkte.</p></div>
   <div class="hrow"><span class="tile c-warn"><Icon name="trophy" /></span><p><b>Punkte</b>Jede Aufgabe hat Punkte. Belohnungen geben welche dazu, Abmahnungen ziehen welche ab. „Heute“, „Woche“ und „Monat“ zählen überall gleich. Wer am Sonntagabend die meisten Wochenpunkte hat, regiert die nächste Woche und darf sich einen freien Tag aussuchen.</p></div>
   <div class="hrow"><span class="tile c-bad"><Icon name="heart" /></span><p><b>Fotos</b>Doppelt auf ein Foto tippen gibt ein Herz. Eine Reaktion gedrückt halten zeigt, wer sie gegeben hat. Eigene Einträge lassen sich als Bild teilen.</p></div>
-  <div class="hrow"><span class="tile c-brand"><Icon name="sparkles" /></span><p><b>Claude</b>Kommentare mit dem Abzeichen „System“ schreibt Claude, eine KI. Sie sieht sich die Fotos an, lobt und gibt Tipps.</p></div>
+  <div class="hrow"><span class="tile c-brand"><Icon name="sparkles" /></span><p><b>Claude</b>Kommentare mit dem Abzeichen „System“ schreibt Claude, eine KI. Claude sieht sich die Fotos an, lobt und gibt Tipps. Antworte auf Claude oder schreib „Claude“ in deinen Kommentar, dann antwortet Claude dir.</p></div>
   {#if G.admin}<p class="hint">Admins stellen unter Verwaltung › Regeln ein, ob es den Dienstplan gibt und ob Extras bis nach den Diensten warten. Ob eine Aufgabe Dienst oder Extra ist, steht bei der Aufgabe.</p>{/if}
 </div>
 <button class="btn wide" style="margin-top:12px" onclick={() => close()}>Alles klar</button>

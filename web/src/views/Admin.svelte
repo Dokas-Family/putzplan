@@ -28,6 +28,11 @@
   let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings });
   const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre', 'claude_aktiv', 'claude_prueft'].some(k => rules[k] !== S.settings[k]));
   const saveRules = async () => (await tryDo(() => put('/settings', rules))) && toast('Regeln gespeichert');
+  let infos = $state(S.claudeInfos);
+  async function saveInfos() {
+    let r;
+    if (await tryDo(async () => { r = await put('/claude-infos', { text: infos }); })) { S.claudeInfos = r.claude_infos; toast('Claude weiß jetzt Bescheid'); }
+  }
 
   const stamp = iso => { const d = new Date(iso); return d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
   const undo = l => confirm('Diese Aktion zurücknehmen?') && tryDo(() => post(`/log/${l.id}/undo`));
@@ -112,6 +117,12 @@
       <div class="row"><span class="icb"><Icon name="bell" /></span><span class="grow"><b>Erinnerung um 17 Uhr</b><small>{rules.dienste ? 'wenn noch Dienste offen sind' : 'wenn noch Punkte zum Tagesziel fehlen'}</small></span>{@render sw(rules.erinnerung, () => (rules.erinnerung = !rules.erinnerung), 'Erinnerung')}</div>
     </section>
     <button class="btn wide" disabled={!dirty} onclick={saveRules}>Regeln speichern</button>
+    <div class="sec-h"><h2><Icon name="sparkles" size={16} />Was Claude über euch wissen soll</h2></div>
+    <section class="card">
+      <p class="sub" style="margin-bottom:8px">Arbeitszeiten, Schule, wer gerade viel um die Ohren hat, wer geschont werden soll. Claude nutzt das für passende Kommentare. Sehen können das nur Admins.</p>
+      <textarea class="inp" rows="6" maxlength="3000" bind:value={infos} placeholder="z. B. Mama arbeitet 12 Stunden am Tag, bitte schonen. Die Kleinen haben bis 13 Uhr Schule."></textarea>
+      <button class="btn sec wide" style="margin-top:8px" disabled={infos === S.claudeInfos} onclick={saveInfos}>Speichern</button>
+    </section>
     <div class="sec-h"><h2>Bereiche</h2><span class="cnt">Icon antippen zum Ändern</span></div>
     <section class="card">
       <div class="pick">

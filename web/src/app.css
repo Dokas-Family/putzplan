@@ -152,6 +152,12 @@ button.chip{border:0;color:inherit}
 .cx{color:var(--muted);margin-left:auto;padding:2px;display:grid;place-items:center}
 .cb p{margin:2px 0 0;font-size:14px;line-height:1.35;overflow-wrap:anywhere;white-space:pre-line}
 .more{color:var(--muted);font-weight:700;font-size:13px;text-align:left;padding:0 2px}
+.cmt.rep{margin-left:24px}
+.cmt.rep .cav{width:24px;height:24px;font-size:13px}
+.at{color:var(--brand-t);font-weight:700;margin-right:4px}
+.reply{color:var(--muted);font-size:12px;font-weight:700;padding:2px 0 0}
+.replying{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:var(--brand-t);padding:0 2px}
+.replying button{color:var(--muted);display:grid;place-items:center;padding:2px}
 .cin{display:flex;gap:8px;align-items:center}
 .cin input{flex:1;min-width:0;border:2px solid var(--line);background:var(--bg);border-radius:99px;padding:8px 14px}
 .cin input:focus{outline:none;border-color:var(--brand)}
@@ -221,6 +227,7 @@ button.chip{border:0;color:inherit}
 .cam .msg{margin:auto;padding:24px;text-align:center}
 .cam .ctl{display:flex;justify-content:space-around;align-items:center;padding:16px 16px calc(20px + env(safe-area-inset-bottom))}
 .cam .ctl .btn{min-width:96px}
+.cam .ctl .row .btn{min-width:48px}
 .shutter{width:76px;height:76px;border-radius:50%;border:5px solid #fff;background:#e5589a}
 .shutter.rec{background:transparent;display:grid;place-items:center}
 .shutter.rec i{width:52px;height:52px;border-radius:50%;background:#e53935;transition:all .2s}

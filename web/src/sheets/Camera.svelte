@@ -7,7 +7,7 @@
   import { toast } from '../lib/ui.svelte.js';
   let { label, kind = 'before', close } = $props();
   let video = $state(), stream = $state.raw(null), error = $state(''), shot = $state.raw(null);
-  let mode = $state('foto'), rec = $state.raw(null), secs = $state(0);
+  let mode = $state('foto'), rec = $state.raw(null), secs = $state(0), torch = $state(false), torchOk = $state(false);
   let facing = 'environment', fakeTimer;
   const dev = import.meta.env.DEV, MAX = 15;
   const two = n => String(n).padStart(2, '0');
@@ -18,7 +18,11 @@
   async function start() {
     stop();
     if (!navigator.mediaDevices?.getUserMedia) return void (error = 'Dieser Browser kann keine Kamera in Apps öffnen. Bitte die App in Chrome oder Safari öffnen.');
-    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false }); error = ''; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+      error = ''; torch = false;
+      torchOk = !!stream.getVideoTracks()[0]?.getCapabilities?.().torch; // Lampe: viele Android-Handys ja, iPhone leider nicht
+    }
     catch {
       if (dev) return fakeCam(); // nur in der Entwicklung: bewegtes Testbild statt Kamera
       error = 'Ich komme nicht an die Kamera. Bitte erlaube den Kamera-Zugriff für diese App und versuch es nochmal. Fotos aus der Galerie gehen absichtlich nicht.';
@@ -43,6 +47,10 @@
     g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, cv.height - fs * 1.8, cv.width, fs * 1.8);
     g.fillStyle = '#fff'; g.fillText(stamp, fs * 0.6, cv.height - fs * 0.6);
     return { photo: cv.toDataURL('image/jpeg', 0.72), thumb: canvas(cv, cv.width, cv.height, 480).toDataURL('image/jpeg', 0.6) };
+  }
+  async function lamp() {
+    try { await stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: !torch }] }); torch = !torch; }
+    catch { torchOk = false; toast('Die Lampe geht auf diesem Handy leider nicht. Mach am besten das Licht an.'); }
   }
   function snap() {
     if (!video?.videoWidth) return toast('Kamera lädt noch …');
@@ -128,7 +136,10 @@
         {:else}
           <button class="shutter" aria-label="Foto machen" onclick={snap}></button>
         {/if}
-        <button class="btn sec" onclick={() => { facing = facing === 'environment' ? 'user' : 'environment'; start(); }} aria-label="Kamera wechseln"><Icon name="switch-camera" /></button>
+        <span class="row" style="gap:6px">
+          {#if torchOk}<button class="btn sec" onclick={lamp} aria-label={torch ? 'Lampe aus' : 'Lampe an'}><Icon name={torch ? 'flashlight' : 'flashlight-off'} /></button>{/if}
+          <button class="btn sec" onclick={() => { facing = facing === 'environment' ? 'user' : 'environment'; start(); }} aria-label="Kamera wechseln"><Icon name="switch-camera" /></button>
+        </span>
       {/if}
     {/if}
   </div>

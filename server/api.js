@@ -4,7 +4,7 @@ import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, i
 import { on, Fail, now, emit, emitDel, emitSettings, emitSay, hashPin, checkPin, pinGuard, startSession, endSession, openStream, dropStreams, STREAM, VERSION } from './core.js';
 import { notify, publicKey } from './push.js';
 import { ensurePlan, initPlan, takeBack, freeUp, tell } from './plan.js';
-import { soon, reviewNow, reviewerReady } from './reviewer.js';
+import { soon, reviewNow, reviewerReady, heard } from './reviewer.js';
 import * as L from '../shared/logic.js';
 
 // ---------- Helfer ----------
@@ -100,6 +100,7 @@ on('GET', '/api/state', 'member', ({ me }) => {
     version: VERSION,
     backup: me.role === 'admin' ? lastBackup() : undefined,
     claude: me.role === 'admin' ? reviewerReady() : undefined, // ist ein API-Schlüssel eingetragen?
+    claude_infos: me.role === 'admin' ? getMeta('claude_infos') || '' : undefined, // was Claude über die Familie wissen soll
     older: !!q.get("select 1 as x from entries where created_at < ? and status = 'done' limit 1", since40()),
   };
 });
@@ -247,9 +248,15 @@ on('POST', '/api/reactions', 'member', ({ body, me }) => {
   if (body.text != null) {
     const text = str(body.text, 300);
     if (!text) throw new Fail(400, 'Der Kommentar ist leer');
-    insert('reactions', { id, entry_id: e.id, member_id: me.id, text, created_at: now() });
-    notify(others, `${me.name} schreibt`, `${text} (${e.title})`);
-    return void emit('reactions', row('reactions', id));
+    // Antwort auf einen Kommentar unter demselben Eintrag
+    const parent = body.reply_to ? row('reactions', body.reply_to) : null;
+    if (body.reply_to && (!parent?.text || parent.entry_id !== e.id)) throw new Fail(400, 'Diesen Kommentar gibt es nicht mehr');
+    insert('reactions', { id, entry_id: e.id, member_id: me.id, text, reply_to: parent?.id || null, created_at: now() });
+    const answered = parent && parent.member_id !== me.id && parent.member_id !== L.SYSTEM.id ? parent.member_id : null;
+    if (answered) notify(answered, `${me.name} hat dir geantwortet`, `${text} (${e.title})`);
+    notify(others.filter(x => x !== answered), `${me.name} schreibt`, `${text} (${e.title})`);
+    emit('reactions', row('reactions', id));
+    return void heard(id); // Claude antwortet, wenn angesprochen
   }
   if (!L.REACTS.includes(body.emoji)) throw new Fail(400, 'Diese Reaktion gibt es nicht');
   const old = q.get('select id from reactions where entry_id = ? and member_id = ? and emoji = ?', e.id, me.id, body.emoji);
@@ -275,8 +282,9 @@ on('POST', '/api/system/say', 'open', ({ req, body }) => {
   if (body.text != null) {
     const text = str(body.text, 600);
     if (!text) throw new Fail(400, 'Der Kommentar ist leer');
-    insert('reactions', { id, entry_id: e.id, member_id: L.SYSTEM.id, text, created_at: now() });
-    if (!body.leise) notify(team, 'Claude ✨', `${text} (${e.title})`); // „leise“: für Nachgeholtes ohne Benachrichtigung
+    const parent = body.reply_to ? row('reactions', body.reply_to) : null;
+    insert('reactions', { id, entry_id: e.id, member_id: L.SYSTEM.id, text, reply_to: parent?.entry_id === e.id ? parent.id : null, created_at: now() });
+    if (!body.leise) notify(parent?.entry_id === e.id && parent.member_id !== L.SYSTEM.id ? parent.member_id : team, 'Claude ✨', `${text} (${e.title})`); // „leise“: für Nachgeholtes ohne Benachrichtigung
   } else {
     if (!L.REACTS.includes(body.emoji)) throw new Fail(400, 'Diese Reaktion gibt es nicht');
     if (q.get('select id from reactions where entry_id = ? and member_id = ? and emoji = ?', e.id, L.SYSTEM.id, body.emoji)) return;
@@ -378,6 +386,13 @@ on('POST', '/api/entries/reward', 'admin', ({ body, me }) => {
   addLog(me, text, [{ t: 'entries', id, patch: { status: 'rejected' } }]);
   emitEntry(id);
   if (kind === 'frei' && period === L.dKey(new Date())) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
+});
+/** Admins: was Claude über die Familie wissen soll (Arbeitszeiten, Schule, wer geschont werden soll). Nur für Admins sichtbar. */
+on('PUT', '/api/claude-infos', 'admin', ({ body, me }) => {
+  const text = String(body.text ?? '').trim().slice(0, 3000);
+  setMeta('claude_infos', text);
+  addLog(me, 'hat geändert, was Claude über die Familie weiß');
+  return { claude_infos: text };
 });
 /** Admins: Claude sich einen Eintrag (nochmal) ansehen lassen. Das Ergebnis kommt über den Live-Kanal. */
 on('POST', '/api/entries/:id/claude', 'admin', ({ p }) => {

@@ -19,7 +19,7 @@ let srv, code, db;
 before(async () => {
   // Der Dienstplan startet hier erst „in ferner Zukunft“, damit die Tests nicht von der Uhrzeit abhängen.
   // Der Test zum Dienstplan schaltet ihn gezielt ein.
-  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test', PLAN_START: '2999-01-01', CLAUDE_FAKE: '1', CLAUDE_DELAY_MS: '600000' }, stdio: ['ignore', 'pipe', 'inherit'] });
+  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test', PLAN_START: '2999-01-01', CLAUDE_FAKE: '1', CLAUDE_DELAY_MS: '600000', CLAUDE_REPLY_DELAY_MS: '50' }, stdio: ['ignore', 'pipe', 'inherit'] });
   code = await new Promise((resolve, reject) => {
     let out = '';
     const timer = setTimeout(() => reject(new Error('Server startet nicht: ' + out)), 15000);
@@ -404,6 +404,28 @@ test('Claude prüft: kommentiert, reagiert und hakt ab, was eindeutig passt (mit
   const mine = st.reactions.filter(r => r.entry_id === duty.id && r.member_id === 'claude');
   assert.ok(mine.some(r => r.text) && mine.some(r => r.emoji === '👏'));
   assert.ok(st.log.some(l => l.member_id === 'claude' && l.can_undo)); // steht im Protokoll und lässt sich zurücknehmen
+});
+
+test('Antworten auf Kommentare, Claude antwortet wenn angesprochen, Familien-Infos nur für Admins', async () => {
+  let st = await admin.get('/api/state');
+  const fromClaude = st.reactions.find(r => r.member_id === 'claude' && r.text);
+  // Mia antwortet Claude: Claude antwortet zurück
+  let r = await mia.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Danke dir!', reply_to: fromClaude.id });
+  const mine = r.changes[0].row;
+  assert.equal(mine.reply_to, fromClaude.id);
+  let back;
+  for (let i = 0; i < 30 && !back; i++) { await wait(100); back = (await mia.get('/api/state')).reactions.find(x => x.member_id === 'claude' && x.reply_to === mine.id); }
+  assert.ok(back, 'Claude hat geantwortet');
+  // Antwort unter Geschwistern: Claude hält sich raus
+  r = await lily.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Ich auch', reply_to: mine.id });
+  await wait(400);
+  assert.ok(!(await mia.get('/api/state')).reactions.some(x => x.member_id === 'claude' && x.reply_to === r.changes[0].row.id));
+  assert.equal((await mia.post('/api/reactions', { entry_id: entry.id, text: 'x', reply_to: 'gibt-es-nicht' })).status, 400);
+  // Was Claude über die Familie weiß: nur Admins
+  assert.equal((await mia.put('/api/claude-infos', { text: 'geheim' })).status, 403);
+  assert.equal((await admin.put('/api/claude-infos', { text: 'Mama bitte schonen' })).claude_infos, 'Mama bitte schonen');
+  assert.equal((await admin.get('/api/state')).claude_infos, 'Mama bitte schonen');
+  assert.ok(!('claude_infos' in (await mia.get('/api/state'))));
 });
 
 test('www leitet auf die Hauptadresse um, die Version ist abfragbar', async () => {
