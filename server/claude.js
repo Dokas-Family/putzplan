@@ -26,6 +26,14 @@ if (cmd === 'neu') {
     const j = await r.json().catch(() => ({}));
     console.log(r.status, it.entry_id, it.text ? it.text.slice(0, 50) : it.emoji, j.error || '');
   }
+} else if (cmd === 'pruefen') {
+  // Claude sieht sich die genannten Einträge an (wie nach dem Abhaken, mit Kommentar und Benachrichtigung)
+  let token = getMeta('system_token');
+  if (!token) { token = randomBytes(24).toString('base64url'); setMeta('system_token', token); }
+  for (const id of process.argv.slice(3)) {
+    const r = await fetch(`http://127.0.0.1:${process.env.PORT || 8080}/api/system/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-System-Token': token }, body: JSON.stringify({ entry_id: id }) });
+    console.log(r.status, id);
+  }
 } else if (cmd === 'probe') {
   // Probelauf mit der echten API: zeigt, was Claude sagen würde, postet nichts
   const { probe } = await import('./reviewer.js');

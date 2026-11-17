@@ -276,6 +276,13 @@ function systemOnly(req) {
   const a = Buffer.from(createHash('sha256').update(given).digest('hex')), b = Buffer.from(createHash('sha256').update(String(key)).digest('hex'));
   if (!local || !key || !timingSafeEqual(a, b)) throw new Fail(403, 'Nur vom Server aus');
 }
+/** Claude einen Eintrag ansehen lassen (aus der Konsole, z. B. für Nachzügler). Läuft im Server, damit offene Apps es sofort sehen. */
+on('POST', '/api/system/review', 'open', ({ req, body }) => {
+  systemOnly(req);
+  const e = entry(body.entry_id);
+  reviewNow(e.id);
+  return { started: true };
+});
 on('POST', '/api/system/say', 'open', ({ req, body }) => {
   systemOnly(req);
   const e = entry(body.entry_id), team = [e.member_id, ...e.helpers], id = randomUUID();
