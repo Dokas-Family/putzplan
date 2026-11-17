@@ -42,16 +42,17 @@ export const PFLICHT_AB = 3;
 const markDuties = () => db.exec(`update tasks set pflicht = 1 where per_person = 0 and coalesce(points, max(1, round(minutes / 5.0))) >= ${PFLICHT_AB}`);
 if (!hasCol('tasks', 'pflicht')) { db.exec('alter table tasks add column pflicht integer default 0'); markDuties(); }
 if (!hasCol('entries', 'before_video')) db.exec('alter table entries add column before_video text; alter table entries add column after_video text;');
+if (!hasCol('entries', 'ai')) db.exec('alter table entries add column ai text'); // was Claude zu den Fotos meint (JSON)
 export { markDuties };
 
 const COLS = {
   members: ['id', 'name', 'emoji', 'role', 'w_weekday', 'w_weekend', 'waschtag', 'active', 'pin_hash', 'sort', 'rain', 'titel', 'away_from', 'away_to', 'pin_help'],
   tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
-  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video'],
+  entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at'],
 };
 const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active', 'pflicht'] };
-const val = v => (v === undefined ? null : v === true ? 1 : v === false ? 0 : Array.isArray(v) ? JSON.stringify(v) : v);
+const val = v => (v === undefined ? null : v === true ? 1 : v === false ? 0 : v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
 
 export const q = {
   get: (sql, ...p) => db.prepare(sql).get(...p.map(val)),
@@ -75,7 +76,11 @@ export function out(table, r) {
   if (!r) return r;
   const o = { ...r };
   for (const b of BOOLS[table] || []) o[b] = !!o[b];
-  if (table === 'entries') { try { o.helpers = JSON.parse(o.helpers || '[]'); } catch { o.helpers = []; } if (!Array.isArray(o.helpers)) o.helpers = []; }
+  if (table === 'entries') {
+    try { o.helpers = JSON.parse(o.helpers || '[]'); } catch { o.helpers = []; }
+    if (!Array.isArray(o.helpers)) o.helpers = [];
+    try { o.ai = o.ai ? JSON.parse(o.ai) : null; } catch { o.ai = null; }
+  }
   if (table === 'members') { o.has_pin = !!o.pin_hash; delete o.pin_hash; }
   if (table === 'log') { o.can_undo = !!o.undo && !o.undone; delete o.undo; o.undone = !!o.undone; }
   return o;

@@ -15,7 +15,7 @@
   const tasks = $derived(S.tasks.filter(t => !t.proposed_by).sort((a, b) => a.room.localeCompare(b.room) || a.title.localeCompare(b.title)));
   const rooms = $derived([...new Set(tasks.map(t => t.room))]);
   const shown = $derived(tasks.filter(t => (room === 'alle' || t.room === room) && (only === 'alle' || (only === 'dienst' ? t.pflicht && !t.per_person : !t.pflicht && !t.per_person)) && t.title.toLowerCase().includes(search.trim().toLowerCase())));
-  const meta = t => `${L.FREQ[t.freq]}${t.freq === 'weekly' ? ` (${L.DAYS_SHORT[t.day || 1]})` : t.freq === 'monthly' ? ` (ab ${t.day || 1}.)` : ''} · ${t.minutes} Min · ${L.ptsOf(t)} P${t.leicht ? ' · auch für Kinder' : ''}${t.per_person ? ' · jeder für sich' : ''}`;
+  const meta = t => `${t.freq === 'tage' ? L.daysOf(t).map(i => L.DAYS_SHORT[i]).join(', ') : L.FREQ[t.freq]}${t.freq === 'weekly' ? ` (${L.DAYS_SHORT[t.day || 1]})` : t.freq === 'monthly' ? ` (ab ${t.day || 1}.)` : ''} · ${t.minutes} Min · ${L.ptsOf(t)} P${t.leicht ? ' · auch für Kinder' : ''}${t.per_person ? ' · jeder für sich' : ''}`;
   const kind = t => (t.per_person ? null : t.pflicht ? ['brand', 'Dienst'] : ['warn', 'Extra']);
   let only = $state('alle'); // alle | dienst | extra
   const toggle = t => tryDo(() => post(`/tasks/${t.id}/active`, { active: !t.active }));
@@ -26,7 +26,7 @@
 
   // Regeln: erst lokal ändern, dann speichern
   let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings });
-  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre'].some(k => rules[k] !== S.settings[k]));
+  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre', 'claude_aktiv', 'claude_prueft'].some(k => rules[k] !== S.settings[k]));
   const saveRules = async () => (await tryDo(() => put('/settings', rules))) && toast('Regeln gespeichert');
 
   const stamp = iso => { const d = new Date(iso); return d.toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' }) + ' ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); };
@@ -107,6 +107,8 @@
       <div class="row"><span class="icb"><Icon name="database-backup" /></span><span class="grow"><b>Letzte Sicherung</b><small>{S.backup ? stamp(S.backup) + ' · läuft jede Nacht' : 'noch keine gelaufen'}</small></span>{#if G.backupLate}<span class="chip c-bad">überfällig</span>{:else if S.backup}<span class="chip c-ok"><Icon name="check" size={14} />in Ordnung</span>{/if}</div>
       <div class="row"><span class="icb"><Icon name="eye" /></span><span class="grow"><b>Punkte zählen erst nach dem Prüfen</b><small>Aus: Punkte gibt es sofort, Ablehnen nimmt sie wieder weg</small></span>{@render sw(rules.review_first, () => (rules.review_first = !rules.review_first), 'Punkte erst nach dem Prüfen')}</div>
       <div class="row"><span class="icb"><Icon name="cooking-pot" /></span><span class="grow"><b>Wer kocht, räumt auf</b><small>Knopf unter „Extra“</small></span>{@render sw(rules.koch_regel, () => (rules.koch_regel = !rules.koch_regel), 'Koch-Regel')}</div>
+      <div class="row"><span class="icb"><Icon name="sparkles" /></span><span class="grow"><b>Claude kommentiert neue Fotos</b><small>{S.claude ? 'Kurz nach jedem Abhaken, mit Benachrichtigung an die Person' : 'Auf dem Server ist noch kein Claude-Schlüssel eingetragen'}</small></span>{@render sw(rules.claude_aktiv, () => (rules.claude_aktiv = !rules.claude_aktiv), 'Claude kommentiert')}</div>
+      {#if rules.claude_aktiv}<div class="row"><span class="icb"><Icon name="badge-check" /></span><span class="grow"><b>Claude darf abhaken</b><small>Was eindeutig passt, gilt als geprüft. Zurückgeben oder ablehnen bleibt bei euch.</small></span>{@render sw(rules.claude_prueft, () => (rules.claude_prueft = !rules.claude_prueft), 'Claude darf abhaken')}</div>{/if}
       <div class="row"><span class="icb"><Icon name="bell" /></span><span class="grow"><b>Erinnerung um 17 Uhr</b><small>{rules.dienste ? 'wenn noch Dienste offen sind' : 'wenn noch Punkte zum Tagesziel fehlen'}</small></span>{@render sw(rules.erinnerung, () => (rules.erinnerung = !rules.erinnerung), 'Erinnerung')}</div>
     </section>
     <button class="btn wide" disabled={!dirty} onclick={saveRules}>Regeln speichern</button>

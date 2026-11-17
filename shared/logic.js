@@ -19,10 +19,13 @@ export const fromKey = k => { const [y, m, d] = k.split('-').map(Number); return
 
 export const DAYS = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 export const DAYS_SHORT = ['', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende' };
+export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', tage: 'an bestimmten Tagen', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende' };
+/** „An bestimmten Tagen“: die Tage stehen als Bits in "day" (Mo = 1, Di = 2, Mi = 4 … So = 64). */
+export const onDay = (t, d) => !!((+t.day || 0) & (1 << (isoDay(d) - 1)));
+export const daysOf = t => [1, 2, 3, 4, 5, 6, 7].filter(i => (+t.day || 0) & (1 << (i - 1)));
 export const ROLES = { admin: 'Admin', mitglied: 'Mitglied', kind: 'Kind' };
 export const REACTS = ['❤️', '👏', '😍', '🔥', '😂', '🤢', '🙈'];
-export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, rooms: {} };
+export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, claude_aktiv: true, claude_prueft: true, rooms: {} };
 export const DEFAULT_RAIN = '🎉✨⭐🧽💪🌈';
 /** Claude als System-Konto: schreibt Kommentare und reagiert, ist aber keine Person im Haushalt. */
 export const SYSTEM = { id: 'claude', name: 'Claude', emoji: '✨', role: 'system', active: false, system: true };
@@ -44,6 +47,7 @@ export function activeOn(t, d) {
   const wd = isoDay(d);
   if (t.freq === 'weekdays') return wd <= 5;
   if (t.freq === 'weekend') return wd >= 6;
+  if (t.freq === 'tage') return onDay(t, d);
   return true;
 }
 export function dueOn(t, d) {
@@ -52,6 +56,7 @@ export function dueOn(t, d) {
     case 'daily': return true;
     case 'weekdays': return wd <= 5;
     case 'weekend': return wd >= 6;
+    case 'tage': return onDay(t, d);
     case 'weekly': return wd === (+t.day || 1);
     case 'monthly': return d.getDate() === Math.min(+t.day || 1, 28);
   }

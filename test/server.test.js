@@ -19,7 +19,7 @@ let srv, code, db;
 before(async () => {
   // Der Dienstplan startet hier erst „in ferner Zukunft“, damit die Tests nicht von der Uhrzeit abhängen.
   // Der Test zum Dienstplan schaltet ihn gezielt ein.
-  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test', PLAN_START: '2999-01-01' }, stdio: ['ignore', 'pipe', 'inherit'] });
+  srv = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, APP_URL: 'https://putzplan.test', NODE_ENV: 'test', PLAN_START: '2999-01-01', CLAUDE_FAKE: '1', CLAUDE_DELAY_MS: '600000' }, stdio: ['ignore', 'pipe', 'inherit'] });
   code = await new Promise((resolve, reject) => {
     let out = '';
     const timer = setTimeout(() => reject(new Error('Server startet nicht: ' + out)), 15000);
@@ -384,6 +384,26 @@ test('Claude als System-Konto: nur vom Server aus und nur mit Schlüssel', async
   assert.ok((await mia.get('/api/state')).reactions.some(x => x.id === c.id));
   assert.equal((await mia.del('/api/reactions/' + c.id)).status, 403);
   assert.equal((await admin.del('/api/reactions/' + c.id)).changes[0].del, c.id);
+});
+
+test('Claude prüft: kommentiert, reagiert und hakt ab, was eindeutig passt (mit Probe-Antwort statt echter API)', async () => {
+  let st = await admin.get('/api/state');
+  assert.equal(st.claude, true);
+  assert.ok(!('claude' in (await mia.get('/api/state'))));
+  const dev = { [ADMIN]: admin, [MIA]: mia, [LILY]: lily };
+  const duty = st.entries.find(e => e.created_by === 'plan' && e.status === 'todo' && dev[e.member_id]);
+  const who = dev[duty.member_id];
+  await who.post('/api/entries/start', { entry_id: duty.id, ...photo });
+  assert.equal(entryOf(await who.post(`/api/entries/${duty.id}/finish`, photo)).review, null);
+  assert.equal((await mia.post(`/api/entries/${duty.id}/claude`)).status, 403); // nur Admins
+  assert.equal((await admin.post(`/api/entries/${duty.id}/claude`)).started, true);
+  let e;
+  for (let i = 0; i < 30 && !e?.ai; i++) { await wait(100); st = await admin.get('/api/state'); e = st.entries.find(x => x.id === duty.id); }
+  assert.equal(e.ai.urteil, 'passt');
+  assert.equal(e.review, 'ok'); // Claude darf abhaken
+  const mine = st.reactions.filter(r => r.entry_id === duty.id && r.member_id === 'claude');
+  assert.ok(mine.some(r => r.text) && mine.some(r => r.emoji === '👏'));
+  assert.ok(st.log.some(l => l.member_id === 'claude' && l.can_undo)); // steht im Protokoll und lässt sich zurücknehmen
 });
 
 test('www leitet auf die Hauptadresse um, die Version ist abfragbar', async () => {

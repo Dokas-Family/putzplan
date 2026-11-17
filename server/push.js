@@ -3,6 +3,7 @@ import * as webpush from 'web-push';
 import { q, getMeta, setMeta, logicState } from './db.js';
 import { isoDay, isAway, dayGoal, dayPoints, buildIndex, planOn, dutiesOn, isOpen } from '../shared/logic.js';
 import { ensurePlan, tell } from './plan.js';
+import { sweep } from './reviewer.js';
 
 let keys = getMeta('vapid');
 if (!keys) { keys = webpush.generateVAPIDKeys(); setMeta('vapid', keys); }
@@ -24,6 +25,7 @@ export function notify(to, title, body) {
 
 function hourly(d) {
   ensurePlan(d); // ab 4 Uhr: Dienstplan für den Tag
+  sweep(); // Claude holt nach, was noch nicht angesehen ist
   const st = logicState(), h = d.getHours(), wd = isoDay(d), tomorrow = wd % 7 + 1;
   const active = st.members.filter(m => m.active && !isAway(m, d));
   if (h === 7) for (const m of active) if (+m.waschtag === wd) notify(m.id, 'Heute ist dein Waschtag!', 'Wäschekorb runterbringen nicht vergessen.');

@@ -31,6 +31,11 @@ test('Fälligkeit: täglich, werktags, Wochenende, wöchentlich, monatlich', () 
   assert.ok(L.dueOn({ freq: 'monthly', day: 31 }, day(2026, 2, 28))); // Tage über 28 zählen als der 28.
   assert.equal(L.slotOf({ per_person: true }, 'mia'), 'mia');
   assert.equal(L.slotOf({ per_person: false }, 'mia'), '');
+  const moDo = { id: 't', freq: 'tage', day: 1 | 8 }; // Montag und Donnerstag
+  assert.ok(L.dueOn(moDo, day(2026, 11, 16)) && L.dueOn(moDo, day(2026, 11, 19)) && !L.dueOn(moDo, day(2026, 11, 18)));
+  assert.ok(L.activeOn(moDo, day(2026, 11, 19)) && !L.activeOn(moDo, sa));
+  assert.deepEqual(L.daysOf(moDo), [1, 4]);
+  assert.equal(L.periodOf(moDo, day(2026, 11, 19)), '2026-11-19');
 });
 
 test('Punkte: eigene Punkte gehen vor, im Team wird aufgerundet geteilt', () => {

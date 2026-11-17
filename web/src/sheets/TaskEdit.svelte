@@ -5,7 +5,7 @@
   import { S, G, put, del } from '../lib/store.svelte.js';
   import { toast, tryDo } from '../lib/ui.svelte.js';
   import { allRooms, roomOf, ROOM_ICONS } from '../lib/rooms.js';
-  import { FREQ, DAYS, ptsOf } from '../../../shared/logic.js';
+  import { FREQ, DAYS, DAYS_SHORT, ptsOf } from '../../../shared/logic.js';
   let { task = null, close } = $props();
   // svelte-ignore state_referenced_locally
   const admin = G.admin, isNew = !task;
@@ -20,7 +20,8 @@
     if (!room) return toast('Wie heißt der Bereich?');
     const ok = await tryDo(async () => {
       if (newRoom && admin) await put('/settings', { rooms: { ...S.settings.rooms, [room]: roomIcon } });
-      await put('/tasks/' + (task?.id || crypto.randomUUID()), { ...f, room, day: f.freq === 'weekly' || f.freq === 'monthly' ? f.day : 0 });
+      if (f.freq === 'tage' && !f.day) throw new Error('Bitte mindestens einen Tag wählen');
+      await put('/tasks/' + (task?.id || crypto.randomUUID()), { ...f, room, day: ['weekly', 'monthly', 'tage'].includes(f.freq) ? f.day : 0 });
     });
     if (ok) { toast(admin ? 'Gespeichert' : 'Vorschlag ist raus. Danke!'); close(); }
   }
@@ -54,7 +55,15 @@
 
 <label class="f" for="t-freq">Wie oft?</label>
 <select id="t-freq" class="inp" bind:value={f.freq}>{#each Object.entries(FREQ) as [k, v] (k)}<option value={k}>{v}</option>{/each}</select>
-{#if f.freq === 'weekly'}
+{#if f.freq === 'tage'}
+  <p class="f">An welchen Tagen?</p>
+  <div class="pick">
+    {#each [1, 2, 3, 4, 5, 6, 7] as i (i)}
+      {@const bit = 1 << (i - 1)}
+      <button class:on={(+f.day || 0) & bit} onclick={() => (f.day = ((+f.day || 0) & 127) ^ bit)}>{DAYS_SHORT[i]}</button>
+    {/each}
+  </div>
+{:else if f.freq === 'weekly'}
   <label class="f" for="t-day">An welchem Tag?</label>
   <select id="t-day" class="inp" bind:value={f.day}>{#each [1, 2, 3, 4, 5, 6, 7] as i (i)}<option value={i}>{DAYS[i]}</option>{/each}</select>
 {:else if f.freq === 'monthly'}

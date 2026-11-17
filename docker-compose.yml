@@ -15,6 +15,8 @@ services:
       APP_URL: ${APP_URL:-}
       # Kontaktangabe für die Push-Dienste von Apple und Google (Pflicht): eine https-Adresse oder mailto:
       PUSH_CONTACT: ${PUSH_CONTACT:-${APP_URL:-mailto:putzplan@example.com}}
+      # Schlüssel für die Claude-API (platform.claude.com). Ohne ihn kommentiert und prüft Claude nichts.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./data:/data
     networks:

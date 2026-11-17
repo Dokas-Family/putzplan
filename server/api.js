@@ -4,6 +4,7 @@ import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, i
 import { on, Fail, now, emit, emitDel, emitSettings, emitSay, hashPin, checkPin, pinGuard, startSession, endSession, openStream, dropStreams, STREAM, VERSION } from './core.js';
 import { notify, publicKey } from './push.js';
 import { ensurePlan, initPlan, takeBack, freeUp, tell } from './plan.js';
+import { soon, reviewNow, reviewerReady } from './reviewer.js';
 import * as L from '../shared/logic.js';
 
 // ---------- Helfer ----------
@@ -98,6 +99,7 @@ on('GET', '/api/state', 'member', ({ me }) => {
     push_key: publicKey,
     version: VERSION,
     backup: me.role === 'admin' ? lastBackup() : undefined,
+    claude: me.role === 'admin' ? reviewerReady() : undefined, // ist ein API-Schlüssel eingetragen?
     older: !!q.get("select 1 as x from entries where created_at < ? and status = 'done' limit 1", since40()),
   };
 });
@@ -155,6 +157,7 @@ on('POST', '/api/entries/:id/finish', 'member', ({ p, body, me }) => {
   const points = e.task_id === 'adhoc' ? (+e.points || 2) : t ? L.ptsOf(t) : 1;
   patch('entries', e.id, { status: 'done', after_photo: savePhoto(e.id + '-n', body.photo, body.thumb), after_at: now(), points, review: null, review_note: null });
   emitEntry(e.id);
+  soon(e.id); // Claude schaut gleich drauf
   return { points };
 });
 on('POST', '/api/entries/:id/redo', 'member', ({ p, body, me }) => {
@@ -163,9 +166,10 @@ on('POST', '/api/entries/:id/redo', 'member', ({ p, body, me }) => {
   if (e.status !== 'done' || e.review !== 'nach') throw new Fail(409, 'Hier ist nichts nachzubessern');
   const name = savePhoto(`${e.id}-n${Date.now().toString(36)}`, body.photo, body.thumb);
   delPhoto(e.after_photo);
-  patch('entries', e.id, { after_photo: name, review: null, review_note: null });
+  patch('entries', e.id, { after_photo: name, review: null, review_note: null, ai: null });
   notify(admins().filter(a => a !== me.id), 'Nachgebessert', `${me.name}: ${e.title}`);
   emitEntry(e.id);
+  soon(e.id); // Claude schaut sich das neue Foto an
 });
 on('POST', '/api/entries/:id/cancel', 'member', ({ p, me }) => {
   const e = entry(p.id);
@@ -272,7 +276,7 @@ on('POST', '/api/system/say', 'open', ({ req, body }) => {
     const text = str(body.text, 600);
     if (!text) throw new Fail(400, 'Der Kommentar ist leer');
     insert('reactions', { id, entry_id: e.id, member_id: L.SYSTEM.id, text, created_at: now() });
-    notify(team, 'Claude ✨', `${text} (${e.title})`);
+    if (!body.leise) notify(team, 'Claude ✨', `${text} (${e.title})`); // „leise“: für Nachgeholtes ohne Benachrichtigung
   } else {
     if (!L.REACTS.includes(body.emoji)) throw new Fail(400, 'Diese Reaktion gibt es nicht');
     if (q.get('select id from reactions where entry_id = ? and member_id = ? and emoji = ?', e.id, L.SYSTEM.id, body.emoji)) return;
@@ -297,7 +301,7 @@ on('POST', '/api/me', 'member', ({ body, me }) => {
 // ---------- Vorschläge und Aufgaben-Verwaltung ----------
 const taskFields = (b, old) => {
   const f = {
-    title: str(b.title, 120), room: str(b.room, 40) || 'Extra', freq: L.FREQ[b.freq] ? b.freq : 'daily', day: int(b.day, 0, 28, 0),
+    title: str(b.title, 120), room: str(b.room, 40) || 'Extra', freq: L.FREQ[b.freq] ? b.freq : 'daily', day: b.freq === 'tage' ? int(b.day, 1, 127, 9) : int(b.day, 0, 28, 0),
     minutes: int(b.minutes, 1, 240, 5), points: int(b.points, 1, 30, 1), leicht: !!b.leicht, per_person: !!b.per_person, active: b.active !== false,
   };
   // Dienst oder Extra: wie angegeben, sonst wie bisher, bei Neuem nach Punkten
@@ -374,6 +378,14 @@ on('POST', '/api/entries/reward', 'admin', ({ body, me }) => {
   addLog(me, text, [{ t: 'entries', id, patch: { status: 'rejected' } }]);
   emitEntry(id);
   if (kind === 'frei' && period === L.dKey(new Date())) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
+});
+/** Admins: Claude sich einen Eintrag (nochmal) ansehen lassen. Das Ergebnis kommt über den Live-Kanal. */
+on('POST', '/api/entries/:id/claude', 'admin', ({ p }) => {
+  const e = entry(p.id);
+  if (!reviewerReady()) throw new Fail(400, 'Für Claude ist noch kein API-Schlüssel eingetragen');
+  if (e.status !== 'done' || !e.before_photo || !e.after_photo) throw new Fail(409, 'Dafür braucht es Vorher- und Nachher-Foto');
+  reviewNow(e.id, { force: true });
+  return { started: true };
 });
 /** Admins: einen Dienst jemand anderem geben. */
 on('POST', '/api/entries/:id/reassign', 'admin', ({ p, body, me }) => {
@@ -464,6 +476,7 @@ on('PUT', '/api/settings', 'admin', ({ body, me }) => {
     ziel_gross: int(body.ziel_gross, 0, 50, s.ziel_gross ?? 10), ziel_klein: int(body.ziel_klein, 0, 50, s.ziel_klein ?? 6),
     koch_regel: body.koch_regel ?? s.koch_regel ? true : false, review_first: body.review_first ?? s.review_first ? true : false, erinnerung: body.erinnerung ?? s.erinnerung ? true : false, rooms,
     dienste: body.dienste ?? s.dienste ? true : false, extras_sperre: body.extras_sperre ?? s.extras_sperre ? true : false,
+    claude_aktiv: body.claude_aktiv ?? s.claude_aktiv ? true : false, claude_prueft: body.claude_prueft ?? s.claude_prueft ? true : false,
   };
   setMeta('settings', next);
   if (next.dienste && !s.dienste) { setMeta('plan_start', null); initPlan(); ensurePlan(); } // wieder eingeschaltet: neu beginnen

@@ -42,6 +42,12 @@
       <button class="btn warn" onclick={() => verdict('nach')}><Icon name="rotate-ccw" size={16} />Zurückgeben</button>
     </div>
   {:else}
+    {#if cur.ai?.at}
+      {@const AI = { passt: ['ok', 'Passt'], nachbessern: ['warn', 'Nachbessern'], unklar: ['info', 'Unklar'] }[cur.ai.urteil] || ['info', 'Unklar']}
+      <div class="strip c-{AI[0]}" style="margin:0 0 10px"><Icon name="sparkles" size={16} /><span class="grow">Claude meint: <b>{AI[1]}</b>{cur.ai.grund ? `. ${cur.ai.grund}` : ''}</span></div>
+    {:else if S.claude}
+      <button class="link" style="margin:-4px 0 6px" onclick={() => tryDo(async () => { await post(`/entries/${cur.id}/claude`); toast('Claude schaut es sich an, dauert etwa eine halbe Minute.'); })}><Icon name="sparkles" size={14} />Claude fragen</button>
+    {/if}
     <div class="btns3">
       <button class="btn ok" disabled={busy} onclick={() => verdict('ok')}><Icon name="check" size={16} />Passt</button>
       <button class="btn warn" disabled={busy} onclick={() => (asking = true)}><Icon name="rotate-ccw" size={16} />Nochmal</button>

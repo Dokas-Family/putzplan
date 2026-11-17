@@ -18,6 +18,9 @@
   const c = $derived(G.calc), d = $derived(c.d), plan = $derived(c.plan);
   // Dienstplan: was heute noch offen ist, und was gestern liegen geblieben ist
   const openDuties = $derived(plan ? G.active.flatMap(m => c.per[m.id].duties.filter(e => e.status === 'todo')) : []);
+  const dutyTotal = $derived(G.active.reduce((s, m) => s + c.per[m.id].duties.length, 0));
+  const dutyDone = $derived(G.active.reduce((s, m) => s + c.per[m.id].dutiesDone, 0));
+  const dutyPct = $derived(dutyTotal ? Math.round((100 * dutyDone) / dutyTotal) : 100);
   const yesterday = $derived(L.dKey(L.noon(d, 1)));
   const missed = $derived(S.entries.filter(e => e.status === 'missed' && L.dutyDay(e) === yesterday));
   async function redo() {
@@ -76,11 +79,11 @@
 </div>
 
 <div class="kpis">
-  {#snippet v1()}{doneCount}<small>/{shared.length}</small>{/snippet}
+  {#snippet v1()}{#if plan}{dutyPct}<small> %</small>{:else}{doneCount}<small>/{shared.length}</small>{/if}{/snippet}
   {#snippet v2()}{runningEntries.length}{/snippet}
   {#snippet v3()}{G.late.length}{/snippet}
   {#snippet v4()}{G.queue.length}{/snippet}
-  {@render kpi('circle-check', 'ok', v1, 'Heute erledigt')}
+  {@render kpi('circle-check', plan && dutyPct < 80 ? 'warn' : 'ok', v1, plan ? `Dienste erledigt (${dutyDone}/${dutyTotal}, Ziel 80 %)` : 'Heute erledigt')}
   {@render kpi('timer', 'info', v2, 'Läuft gerade')}
   {@render kpi('hourglass', 'bad', v3, 'Liegengeblieben', G.late.length ? () => open(Late) : null)}
   {@render kpi('eye', 'brand', v4, 'Zu prüfen', G.queue.length ? () => open(Review) : null)}
