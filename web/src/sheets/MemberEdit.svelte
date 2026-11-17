@@ -37,6 +37,7 @@
   <div class="grow"><label class="f" for="m-wd">Pensum Mo–Fr</label><select id="m-wd" class="inp" bind:value={f.w_weekday}>{#each loads(f.w_weekday) as [v, l] (v)}<option value={v}>{l}</option>{/each}</select></div>
   <div class="grow"><label class="f" for="m-we">Pensum Wochenende</label><select id="m-we" class="inp" bind:value={f.w_weekend}>{#each loads(f.w_weekend) as [v, l] (v)}<option value={v}>{l}</option>{/each}</select></div>
 </div>
+<p class="hint" style="margin-top:6px">Für das Tagesziel gilt ein neues Pensum ab morgen, für den Dienstplan ab der nächsten Verteilung.</p>
 <div class="row" style="gap:12px">
   <div class="grow"><label class="f" for="m-wt">Waschtag</label><select id="m-wt" class="inp" bind:value={f.waschtag}><option value={null}>kein Waschtag</option>{#each [1, 2, 3, 4, 5, 6, 7] as i (i)}<option value={i}>{DAYS[i]}</option>{/each}</select></div>
   <div class="grow"><label class="f" for="m-titel">Titel als Wochensieger</label><select id="m-titel" class="inp" bind:value={f.titel}><option value={null}>Majestät</option><option value="k">König</option><option value="q">Königin</option></select></div>

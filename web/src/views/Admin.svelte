@@ -106,6 +106,7 @@
         <div class="row"><span class="icb"><Icon name="target" /></span><span class="grow"><b>Tagesziel</b><small>Punkte für eine Person mit normalem Pensum</small></span><input class="inp num-in" type="number" min="1" max="50" bind:value={rules.tagesziel} /></div>
         <div class="row"><span class="icb"><Icon name="user" /></span><span class="grow"><b>Mindestens pro Tag: Erwachsene</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_gross} /></div>
         <div class="row"><span class="icb"><Icon name="baby" /></span><span class="grow"><b>Mindestens pro Tag: Kinder</b><small>Punkte, auch bei wenig Pensum</small></span><input class="inp num-in" type="number" min="0" max="50" bind:value={rules.ziel_klein} /></div>
+        <p class="hint" style="margin:0 0 6px">Änderungen am Tagesziel gelten ab morgen. Vergangene Tage und Serien bleiben, wie sie waren.</p>
       {/if}
       <div class="row"><span class="icb"><Icon name="timer" /></span><span class="grow"><b>Mindestzeit zwischen den Fotos</b><small>in Minuten</small></span><input class="inp num-in" type="number" min="0" max="60" bind:value={rules.min_minutes} /></div>
       <div class="row"><span class="icb"><Icon name="image" /></span><span class="grow"><b>Fotos bleiben dauerhaft gespeichert</b><small>Ältere lassen sich unter „Fotos“ nachladen</small></span><Icon name="infinity" /></div>

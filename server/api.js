@@ -1,9 +1,9 @@
 // Alle Anfragen der App. Jede Regel (wer darf was, wie viele Punkte) wird hier geprüft, nicht im Handy.
 import { randomUUID, createHash, timingSafeEqual } from 'node:crypto';
-import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, inviteCode, newCode, savePhoto, delPhoto, delVideo, logicState, since40, lastBackup, PFLICHT_AB } from './db.js';
-import { on, Fail, now, emit, emitDel, emitSettings, emitSay, hashPin, checkPin, pinGuard, startSession, endSession, openStream, dropStreams, STREAM, VERSION } from './core.js';
+import { q, row, out, insert, patch, save, remove, settings, getMeta, setMeta, inviteCode, newCode, savePhoto, delPhoto, delVideo, logicState, since40, lastBackup, tageMap, PFLICHT_AB } from './db.js';
+import { on, Fail, now, emit, emitDel, emitAll, emitSettings, emitSay, restoreRow, hashPin, checkPin, pinGuard, startSession, endSession, openStream, dropStreams, STREAM, VERSION } from './core.js';
 import { notify, publicKey } from './push.js';
-import { ensurePlan, initPlan, takeBack, freeUp, tell } from './plan.js';
+import { ensurePlan, initPlan, takeBack, freeUp, tell, fixDays } from './plan.js';
 import { soon, reviewNow, reviewerReady, heard } from './reviewer.js';
 import { antraegeFor, chatLast, chatReady } from './chat.js';
 import * as L from '../shared/logic.js';
@@ -266,7 +266,7 @@ on('DELETE', '/api/entries/:id', 'member', ({ p, me }) => {
 on('POST', '/api/redeem', 'member', ({ me }) => {
   const st = logicState(), ix = L.buildIndex(st), d = L.noon(), m = out('members', me);
   if (L.planOn(st.settings, d)) throw new Fail(400, 'Mit dem Dienstplan gibt es kein Punktekonto mehr');
-  const amount = Math.min(L.bank(ix, m, st, d), L.dayGoal(m, d, st.settings) - L.dayPoints(ix, m.id, d));
+  const amount = Math.min(L.bank(ix, m, st, d), L.goalOf(st, m, d) - L.dayPoints(ix, m.id, d));
   if (amount <= 0) throw new Fail(400, 'Gerade gibt es nichts einzulösen');
   const id = randomUUID(), iso = now();
   insert('entries', { id, task_id: 'redeem', title: 'Punkte vom Konto eingelöst', member_id: m.id, period: L.dKey(d), slot: id, status: 'done', points: amount, after_at: iso, created_at: iso, created_by: m.id, helpers: [] });
@@ -281,7 +281,7 @@ on('POST', '/api/royal', 'member', ({ body, me }) => {
   if (!L.royals(st, today).some(r => r.m.id === m.id)) throw new Fail(403, 'Das dürfen nur die Wochensieger');
   if (L.royalDayTaken(st, m, today)) throw new Fail(409, 'Dein freier Tag ist schon vergeben');
   const id = randomUUID();
-  insert('entries', { id, task_id: 'frei', title: 'Königlicher freier Tag', note: 'royal', member_id: m.id, period: L.dKey(d), slot: id, status: 'done', points: L.dayGoal(m, d, st.settings) || 1, after_at: d.toISOString(), created_at: now(), created_by: m.id, helpers: [] });
+  insert('entries', { id, task_id: 'frei', title: 'Königlicher freier Tag', note: 'royal', member_id: m.id, period: L.dKey(d), slot: id, status: 'done', points: L.goalOf(st, m, d) || 1, after_at: d.toISOString(), created_at: now(), created_by: m.id, helpers: [] });
   emitEntry(id);
   if (L.dKey(d) === L.dKey(today)) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
 });
@@ -424,8 +424,12 @@ on('POST', '/api/entries/reward', 'admin', ({ body, me }) => {
   const kind = body.kind, m = out('members', member(body.member_id)), id = randomUUID(), iso = now(), reason = str(body.reason, 160);
   let points, period = L.dKey(new Date()), after_at = iso, title = reason, text;
   if (kind === 'frei') {
-    const d = L.noon(new Date(), -int(body.when, 0, 6, 0));
-    points = L.dayGoal(m, d, settings()) || 1; period = L.dKey(d); after_at = d.toISOString(); title = reason || 'Freier Tag';
+    // "day" (JJJJ-MM-TT, bis 6 Tage zurück oder 14 voraus) oder "when" (0 heute, 1 morgen … wie in der App)
+    const today = L.noon(), d = isDate(body.day) ? L.fromKey(body.day) : L.noon(today, -int(body.when, 0, 6, 0));
+    const diff = Math.round((d - today) / 864e5);
+    if (diff < -6 || diff > 14) throw new Fail(400, 'Frei geht von 6 Tagen zurück bis 14 Tage voraus');
+    if (q.get("select id from entries where task_id = 'frei' and member_id = ? and period = ? and status = 'done'", m.id, L.dKey(d))) throw new Fail(409, `${m.name} hat an dem Tag schon frei`);
+    points = L.goalOf({ settings: settings(), tage: tageMap() }, m, d) || 1; period = L.dKey(d); after_at = d.toISOString(); title = reason || 'Freier Tag';
     notify(m.id, 'Du hast frei!', `${dayText(d)} ${title}`);
     text = `hat ${m.name} am ${dayText(d)} frei gegeben`;
   } else if (kind === 'bonus' || kind === 'warn') {
@@ -513,7 +517,7 @@ on('PUT', '/api/members/:id', 'admin', ({ p, body, me }) => {
   if (!f.name) throw new Fail(400, 'Der Name fehlt');
   if (old?.role === 'admin' && (f.role !== 'admin' || !f.active) && !q.get("select id from members where role = 'admin' and active = 1 and id <> ?", p.id)) throw new Fail(400, 'Mindestens eine Person muss Admin bleiben');
   if (old) patch('members', p.id, f);
-  else insert('members', { id: p.id, ...f, sort: (q.get('select max(sort) as m from members').m ?? 0) + 1 });
+  else { insert('members', { id: p.id, ...f, sort: (q.get('select max(sort) as m from members').m ?? 0) + 1 }); fixDays(); }
   if (old && (old.role !== f.role || !f.active)) dropStreams(p.id);
   addLog(me, old ? `hat die Einstellungen von ${f.name} geändert` : `hat ${f.name} hinzugefügt`);
   emit('members', row('members', p.id));
@@ -566,14 +570,16 @@ on('POST', '/api/log/:id/undo', 'admin', ({ p }) => {
   if (!l.undo || l.undone) throw new Fail(409, 'Lässt sich nicht (mehr) zurücknehmen');
   const ops = JSON.parse(l.undo);
   for (const op of ops) {
+    if (op.restore) continue; // ganze alte Zeile zurückschreiben (Änderungen von Claude an der Datenbank)
     const cur = row(op.t, op.id);
-    if (!cur) throw new Fail(409, 'Den Eintrag gibt es nicht mehr');
+    if (!cur && !op.gone) throw new Fail(409, 'Den Eintrag gibt es nicht mehr');
     for (const [k, v] of Object.entries(op.only || {})) if (cur[k] !== v) throw new Fail(409, 'Schon angefangen, lässt sich nicht mehr zurücknehmen');
   }
   for (const op of ops) {
-    if (op.del) { remove(op.t, op.id); emitDel(op.t, op.id); continue; }
+    if (op.restore) { restoreRow(op.t, op.restore); continue; }
+    if (op.del) { remove(op.t, op.id); if (op.t === 'tage') emitAll({ t: 'tage', del: op.id }); else emitDel(op.t, op.id); continue; }
     try { patch(op.t, op.id, op.patch); } catch (e) { if (/UNIQUE/i.test(e.message)) throw new Fail(409, 'Die Aufgabe wurde inzwischen neu gemacht'); throw e; }
-    emit(op.t, row(op.t, op.id));
+    if (op.t === 'tage') emitAll({ t: 'tage', row: out('tage', row('tage', op.id)) }); else emit(op.t, row(op.t, op.id));
   }
   q.run('update log set undone = 1 where id = ?', l.id);
   emit('log', row('log', l.id), { adminOnly: true });

@@ -45,7 +45,7 @@ So funktioniert die App, falls jemand fragt:
 - Jede Aufgabe: Vorher-Foto, putzen, Nachher-Foto (oder ein kurzes Video). Mit „Mithelfen“ teilt man sich die Punkte.
 - Die Kamera in der App hat keinen Blitz. Auf manchen Android-Handys gibt es eine Lampe, auf dem iPhone nicht. Bei dunklen Fotos rätst du also zu Licht an oder einer Lampe, nie zum Blitz.
 - Punkte gibt es pro Aufgabe, dazu Belohnungen und Abmahnungen von den Admins (Dorina und Felix). Wer am Sonntagabend die meisten Wochenpunkte hat, regiert die nächste Woche als König oder Königin und darf sich einen freien Tag aussuchen.
-- Serie: Tage am Stück, an denen alle eigenen Dienste erledigt waren.
+- Serie: Tage am Stück, die geschafft sind. Mit Dienstplan heißt das: alle eigenen Dienste erledigt, an Tagen davor: Tagesziel in Punkten erreicht. Freie Tage und Tage ohne Dienste brechen sie nicht ab. Jeder Tag zählt nach den Regeln, die an ihm galten, neue Regeln gelten erst ab dem nächsten Tag.
 - Einen offenen Dienst von jemand anderem kann man übernehmen („Wer hat heute was?“ oder im Chat): Dann zählt er für die Person, die ihn macht, mit einem Bonuspunkt obendrauf.
 - Im Reiter „Claude“ kann jede Person mit dir chatten: Fragen stellen, Extra-Arbeit mit Foto nachweisen, Anträge an die Admins stellen.`;
 const PERSONA = `${PERSONA_BASE}

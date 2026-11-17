@@ -131,12 +131,18 @@ Die Datei enthält eine Liste wie `[{ "entry_id": "…", "text": "…" }, { "ent
 
 Mit `ANTHROPIC_API_KEY` sieht sich Claude neue Einträge selbst an. Aus Videos schneidet der Server dafür bis zu sechs Standbilder (ffmpeg im Container), weil die API keine Videos annimmt.
 
+### Serie und festgeschriebene Tage
+
+Kurz nach Mitternacht schreibt der Server für jede Person die Regeln des neuen Tages fest (Tabelle `tage`: Tagesziel und ob der Dienstplan gilt). Die Serie rechnet jeden Tag nach seinen eigenen Regeln. Ein neues Pensum, ein anderes Tagesziel oder der Start des Dienstplans gelten damit ab dem nächsten Tag und rechnen nie die Vergangenheit um. Freie Tage und Tage ohne Dienste brechen die Serie nicht ab.
+
 ### Chat mit Claude
 
-Im Reiter „Claude“ kann jede Person mit Claude schreiben (Opus 5.5, Aufwand „medium“). Claude sieht alles, was die App weiß, und handelt mit genau den Rechten der Person, die schreibt.
+Im Reiter „Claude“ kann jede Person mit Claude schreiben (Opus 5.5, Aufwand „medium“). Claude hat volle Rechte, mehr als ein Admin: alle Werkzeuge der App und die Datenbank zum Lesen und Schreiben (Werkzeug `datenbank`). Gesperrt bleiben Sitzungen, Push-Anmeldungen, PIN-Hashes und Schlüssel. Jede Änderung steht im Protokoll und lässt sich dort zurücknehmen.
 
-- Selbst entscheiden darf Claude nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag.
-- Alles andere wird ein Antrag. Die Admins sehen ihn in der Übersicht unter „Wartet auf dich“ und nehmen an oder lehnen ab.
+- Im Chat mit Admins tut Claude, was sie wollen: auch belohnen, abmahnen, frei geben (bis 6 Tage zurück), Regeln ändern, die App neu starten (höchstens alle 10 Minuten).
+- Im Chat mit allen anderen gilt der Schutz gegen Mogeln: Reparieren ja (falscher Tag, Doppeltes, kaputte Serie), aber nichts, was jemandem mehr als 3 Punkte bringt. Die Datenbank prüft das selbst und rollt sonst zurück. Schreiben dort nur in `entries`, `reactions`, `tage`, fremde Chats lesen geht nicht.
+- Selbst vergibt Claude dort nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag. Alles andere wird ein Antrag. Die Admins sehen ihn in der Übersicht unter „Von Claude“ und nehmen an oder lehnen ab.
+- Mogelversuche meldet Claude den Admins (ebenfalls unter „Von Claude“). Die gemeldete Person sieht die Meldung nicht.
 - Offene Dienste anderer lassen sich übernehmen (im Chat oder unter „Wer hat heute was?“): Punkte plus 1 Bonuspunkt.
 - Admins sehen unter „Alle Chats“ jeden Verlauf und was er diesen Monat gekostet hat. Alle anderen sehen keine Beträge.
 - Grenze: 10 € API-Kosten pro Person und Monat, Admins ohne Grenze (`CHAT_LIMIT_EUR` in der `.env` ändert das).

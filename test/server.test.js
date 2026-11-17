@@ -510,6 +510,63 @@ test('Chat mit Claude: eigener Verlauf, Admins lesen mit, Bonus nur mit Beweis, 
   assert.ok((await admin.post('/api/chat', { text: 'Hallo' })).id);
 });
 
+test('Claude mit vollen Rechten: Datenbank lesen und reparieren, Schutz gegen Mogeln, Meldungen, frei für gestern', async () => {
+  const said = r => (r.changes || []).filter(c => c.t === 'chat').map(c => c.row).find(m => m.role === 'claude')?.text || '';
+  // Lesen: Geheimes bleibt zu
+  let r = await mia.post('/api/chat', { text: `!sql select name, pin_hash from members where id = '${MIA}'` });
+  assert.match(said(r), /"pin_hash":null/);
+  r = await mia.post('/api/chat', { text: '!sql select * from sessions' });
+  assert.match(said(r), /Geht nicht/);
+  r = await mia.post('/api/chat', { text: "!sql select value from einstellungen where key = 'settings'" });
+  assert.match(said(r), /^1 Zeilen/);
+  r = await mia.post('/api/chat', { text: "!sql select value from einstellungen where key = 'code'" });
+  assert.match(said(r), /Keine Zeilen/);
+  r = await mia.post('/api/chat', { text: `!sql select text from chat where member_id = '${ADMIN}'` });
+  assert.match(said(r), /Geht nicht/, 'fremde Chats nur im Chat mit Admins');
+  // Schutz gegen Mogeln: sich selbst Punkte zuschieben geht nicht, auch nicht über die Datenbank
+  const iso = new Date().toISOString();
+  db.prepare("insert into entries (id, task_id, title, member_id, period, slot, status, points, helpers, created_by, created_at) values ('dup-mia', 'adhoc', 'Doppelt', ?, ?, ?, 'todo', 2, '[]', ?, ?)").run(MIA, L.dKey(new Date()), MIA, MIA, iso);
+  r = await mia.post('/api/chat', { text: `!sql update entries set status = 'done', after_at = '${iso}', points = 40 where id = 'dup-mia'` });
+  assert.match(said(r), /mehr als 3 Punkte/);
+  assert.equal(db.prepare("select status from entries where id = 'dup-mia'").get().status, 'todo', 'zurückgerollt');
+  r = await mia.post('/api/chat', { text: `!sql update members set role = 'admin' where id = '${MIA}'` });
+  assert.match(said(r), /Geht nicht/);
+  // Reparieren geht: steht im Protokoll und lässt sich zurücknehmen
+  r = await mia.post('/api/chat', { text: "!sql update entries set status = 'rejected' where id = 'dup-mia'" });
+  assert.match(said(r), /1× entries geändert/);
+  assert.ok(r.changes.some(c => c.t === 'entries' && c.row.id === 'dup-mia' && c.row.status === 'rejected'));
+  const log = (await admin.get('/api/state')).log.find(l => l.member_id === 'claude' && /Datenbank/.test(l.text));
+  assert.ok(log?.can_undo && /im Chat mit Mia/.test(log.text));
+  assert.equal((await admin.post(`/api/log/${log.id}/undo`)).status, 200);
+  assert.equal(db.prepare("select status from entries where id = 'dup-mia'").get().status, 'todo');
+  // Punkte und freie Tage vergeben nur im Chat mit Admins, dort auch nachträglich: „gestern“ heißt gestern
+  const gestern = L.dKey(L.noon(new Date(), 1));
+  await mia.post('/api/chat', { text: `!frei ${gestern}` });
+  await wait(150);
+  assert.match((await mia.get('/api/chat')).messages.at(-1).text, /nur im Chat mit Dorina oder Felix/);
+  await admin.post('/api/chat', { text: `!frei ${gestern}` });
+  await wait(150);
+  assert.ok(db.prepare("select id from entries where task_id = 'frei' and member_id = ? and period = ? and status = 'done'").get(ADMIN, gestern), 'frei für gestern, nicht für morgen');
+  await admin.post('/api/chat', { text: `!frei ${gestern}` });
+  await wait(150);
+  assert.match((await admin.get('/api/chat')).messages.at(-1).text, /schon frei/, 'nicht doppelt');
+  // Mogelversuch melden: nur Admins sehen die Meldung, die Person erfährt nichts davon
+  r = await mia.post('/api/chat', { text: '!melden' });
+  assert.match(said(r), /Gemeldet/);
+  assert.ok(!(await mia.get('/api/state')).antraege.some(a => a.kind === 'meldung'));
+  const m = (await admin.get('/api/state')).antraege.find(a => a.kind === 'meldung' && a.member_id === MIA);
+  assert.ok(m);
+  const before = (await mia.get('/api/chat')).messages.length;
+  assert.equal((await admin.post(`/api/antraege/${m.id}/decide`, { accept: true })).antrag.status, 'erledigt');
+  assert.equal((await mia.get('/api/chat')).messages.length, before);
+});
+
+test('Tagesregeln werden festgeschrieben und kommen mit dem Zustand', async () => {
+  const st = await mia.get('/api/state');
+  assert.ok(st.tage[L.tagKey(MIA, new Date())], 'heute ist festgeschrieben');
+  assert.equal(typeof st.tage[L.tagKey(MIA, new Date())].goal, 'number');
+});
+
 test('www leitet auf die Hauptadresse um, die Version ist abfragbar', async () => {
   const r = await fetch(BASE + '/abc?x=1', { redirect: 'manual', headers: { 'X-Forwarded-Host': 'www.putzplan.test' } });
   assert.equal(r.status, 301);

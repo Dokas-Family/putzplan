@@ -14,6 +14,7 @@ class Store {
   older = $state.raw([]); // nachgeladene Einträge, die älter sind als der geladene Zeitraum (nur für die Foto-Ansicht)
   olderMore = $state(false);
   settings = $state.raw({ ...L.DEFAULT_SETTINGS });
+  tage = $state.raw({}); // festgeschriebene Regeln je Person und Tag (Tagesziel, Dienstplan an/aus)
   pushKey = null;
   tab = $state('heute');
   now = $state(Date.now());
@@ -38,7 +39,7 @@ const byId = $derived(new Map(S.members.map(m => [m.id, m])));
 const me = $derived(byId.get(S.meId) || null);
 const reactionsBy = $derived.by(() => { const m = new Map(); for (const r of S.reactions) (m.get(r.entry_id) || m.set(r.entry_id, []).get(r.entry_id)).push(r); return m; });
 const calc = $derived.by(() => {
-  const st = { members: S.members, tasks: S.tasks, entries: S.entries, settings: S.settings };
+  const st = { members: S.members, tasks: S.tasks, entries: S.entries, settings: S.settings, tage: S.tage };
   const d = new Date(S.now), ix = L.buildIndex(st), plan = L.planOn(st.settings, d);
   const dy = L.dayTotals(st, d), wk = L.weekPoints(st, d), mo = L.monthPoints(st, d), per = {};
   for (const m of S.members) {
@@ -50,7 +51,8 @@ const calc = $derived.by(() => {
       // Dienstplan: was jemand heute hat und wie viel davon erledigt ist
       duties, dutiesDone: duties.filter(e => e.status === 'done').length, dutyWeek: plan ? L.dutyWeek(ix, m.id, d) : null,
       // ohne Dienstplan: altes Tagesziel in Punkten und Konto
-      goal: plan ? 0 : L.dayGoal(m, d, st.settings), goalPts: L.dayPoints(ix, m.id, d), bank: plan ? 0 : L.bank(ix, m, st, d),
+      goal: plan ? 0 : L.goalOf(st, m, d), goalPts: L.dayPoints(ix, m.id, d), bank: plan ? 0 : L.bank(ix, m, st, d),
+      frei: L.hasFrei(ix, m.id, d), // heute frei bekommen
     };
   }
   return { st, d, ix, per, plan, today: L.dKey(d) };
@@ -167,6 +169,7 @@ export function apply(c) {
   if (c.t === 'settings') return void (S.settings = { ...L.DEFAULT_SETTINGS, ...c.row });
   if (c.t === 'say') return void (S.say = { ...c.row, at: Date.now() });
   if (c.t === 'chatbusy') return void setChatBusy(c.row);
+  if (c.t === 'tage') { const next = { ...S.tage }; if (c.del != null) delete next[c.del]; else next[c.row.id] = c.row; return void (S.tage = next); }
   const list = S[c.t];
   if (!Array.isArray(list)) return;
   if (c.del != null) return void (S[c.t] = list.filter(x => x.id !== c.del));
@@ -184,7 +187,7 @@ async function loadState() {
   const old = new Set(S.older.map(e => e.id)); // Reaktionen zu nachgeladenen alten Fotos behalten
   S.meId = st.me; S.members = st.members; S.tasks = st.tasks; S.entries = st.entries; S.log = st.log;
   S.reactions = [...st.reactions, ...S.reactions.filter(r => old.has(r.entry_id))];
-  S.settings = { ...L.DEFAULT_SETTINGS, ...st.settings }; S.pushKey = st.push_key;
+  S.settings = { ...L.DEFAULT_SETTINGS, ...st.settings }; S.pushKey = st.push_key; S.tage = st.tage || {};
   if (!S.older.length) S.olderMore = !!st.older;
   S.backup = st.backup ?? null;
   S.claude = !!st.claude;

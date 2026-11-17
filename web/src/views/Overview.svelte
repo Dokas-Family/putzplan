@@ -37,7 +37,11 @@
   const inbox = $derived([
     G.backupLate && { icon: 'database-backup', c: 'bad', title: 'Sicherung überfällig', sub: `Zuletzt gelaufen: ${new Date(S.backup).toLocaleString('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}`, go: () => { S.tab = 'verwaltung'; scrollTo(0, 0); } },
     ...G.pinHelp.map(m => ({ icon: 'key-round', c: 'info', title: `PIN vergessen: ${m.name}`, sub: 'Antippen zum Zurücksetzen', go: () => resetPin(m) })),
-    G.openAntraege.length && { icon: 'send', c: 'brand', title: 'Anträge über Claude', sub: `${G.openAntraege.length} offen · ${[...new Set(G.openAntraege.map(a => mName(a.member_id)))].join(', ')}`, go: () => open(Antraege) },
+    G.openAntraege.length && (() => {
+      const n = G.openAntraege.filter(a => a.kind !== 'meldung').length, w = G.openAntraege.length - n;
+      const parts = [n && `${n} ${n === 1 ? 'Antrag' : 'Anträge'}`, w && `${w} ${w === 1 ? 'Meldung' : 'Meldungen'}`].filter(Boolean).join(', ');
+      return { icon: w ? 'shield-alert' : 'send', c: w ? 'bad' : 'brand', title: 'Von Claude', sub: `${parts} · ${[...new Set(G.openAntraege.map(a => mName(a.member_id)))].join(', ')}`, go: () => open(Antraege) };
+    })(),
     G.queue.length && { icon: 'eye', c: 'brand', title: 'Fotos prüfen', sub: `${G.queue.length} neue Vorher/Nachher-Paare`, go: () => open(Review) },
     G.proposals.length && { icon: 'lightbulb', c: 'warn', title: 'Vorschläge', sub: `${G.proposals.length} neue Aufgaben-Ideen`, go: () => open(Proposals) },
     G.late.length && { icon: 'hourglass', c: 'bad', title: 'Liegengeblieben', sub: `${G.late.length} ${G.late.length === 1 ? 'Aufgabe wartet' : 'Aufgaben warten'} schon länger`, go: () => open(Late) },
@@ -47,6 +51,7 @@
   function status(m) {
     const p = c.per[m.id];
     if (L.isAway(m, d)) return ['info', 'Abwesend'];
+    if (p.frei) return ['info', 'Heute frei'];
     if (plan) {
       if (!p.duties.length) return ['info', 'Keine Dienste'];
       if (p.dutiesDone === p.duties.length) return ['ok', 'Fertig'];

@@ -1,8 +1,8 @@
 // Push-Benachrichtigungen und der stündliche Wecker (Waschtag, Tagesziel).
 import * as webpush from 'web-push';
 import { q, getMeta, setMeta, logicState } from './db.js';
-import { isoDay, isAway, dayGoal, dayPoints, buildIndex, planOn, dutiesOn, isOpen } from '../shared/logic.js';
-import { ensurePlan, tell } from './plan.js';
+import { isoDay, isAway, goalOf, dayPoints, buildIndex, planOn, dutiesOn, isOpen } from '../shared/logic.js';
+import { ensurePlan, tell, fixDays } from './plan.js';
 import { sweep } from './reviewer.js';
 
 let keys = getMeta('vapid');
@@ -24,6 +24,7 @@ export function notify(to, title, body) {
 }
 
 function hourly(d) {
+  fixDays(d); // kurz nach Mitternacht: Regeln für den neuen Tag festschreiben
   ensurePlan(d); // ab 4 Uhr: Dienstplan für den Tag
   sweep(); // Claude holt nach, was noch nicht angesehen ist
   const st = logicState(), h = d.getHours(), wd = isoDay(d), tomorrow = wd % 7 + 1;
@@ -44,7 +45,7 @@ function hourly(d) {
   if (h === 17 && st.settings.erinnerung) {
     const ix = buildIndex(st);
     for (const m of active) {
-      const goal = dayGoal(m, d, st.settings), p = dayPoints(ix, m.id, d);
+      const goal = goalOf(st, m, d), p = dayPoints(ix, m.id, d);
       if (goal > 0 && p < goal) notify(m.id, p === 0 ? 'Noch nichts gemacht heute?' : 'Fast geschafft!', `Noch ${goal - p} Punkte bis zu deinem Tagesziel. Such dir was aus!`);
     }
   }

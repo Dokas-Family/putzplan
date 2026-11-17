@@ -77,6 +77,23 @@ export const emit = (table, r, { adminOnly = false } = {}) => send({ t: table, r
 /** Nur an eine Person (alle ihre Geräte) und die Admins, z. B. Chat-Nachrichten und Anträge. */
 export const emitTo = (memberId, table, r) => send({ t: table, row: out(table, r) }, false, memberId);
 export const emitRaw = (memberId, change) => send(change, false, memberId);
+/** Eine fertige Änderung an alle (z. B. festgeschriebene Tagesregeln). */
+export const emitAll = change => send(change, false);
+/** Den aktuellen Stand einer Zeile an die richtigen Geräte schicken (gibt es sie nicht mehr: als gelöscht). */
+export function emitRow(t, id) {
+  const r = row(t, id);
+  if (t === 'log') return r && send({ t, row: out(t, r) }, true);
+  if (t === 'tage') return send(r ? { t, row: out(t, r) } : { t, del: id }, false);
+  if (t === 'chat' || t === 'antraege') return r && send({ t, row: out(t, r) }, false, r.member_id);
+  if (!['entries', 'reactions', 'tasks', 'members'].includes(t)) return;
+  send(r ? { t, row: out(t, r) } : { t, del: id }, false);
+}
+/** Ganze alte Zeile zurückschreiben (Rückgängig für Änderungen, die Claude direkt an der Datenbank gemacht hat). */
+export function restoreRow(t, r) {
+  const cols = Object.keys(r);
+  q.run(`insert or replace into ${t} (${cols.join(',')}) values (${cols.map(() => '?').join(',')})`, ...cols.map(c => r[c]));
+  emitRow(t, r.id);
+}
 export const emitDel = (table, id) => send({ t: table, del: id }, false);
 export const emitSettings = s => send({ t: 'settings', row: s }, false);
 export const emitSay = r => send({ t: 'say', row: r }, false);

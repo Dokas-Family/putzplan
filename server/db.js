@@ -53,6 +53,9 @@ db.exec(`
   create table if not exists antraege (id text primary key, member_id text, kind text, points integer, day text, reason text, proof text, status text default 'offen',
     by text, decided_by text, decided_at text, note text, created_at text);
 `);
+// Festgeschriebene Regeln je Person und Tag (Tagesziel, galt der Dienstplan?). Kennung "Person|JJJJ-MM-TT".
+// Neue Regeln gelten so erst ab dem nächsten Tag und rechnen nie die Vergangenheit (und damit keine Serie) um.
+db.exec('create table if not exists tage (id text primary key, member_id text, day text, goal integer, plan integer default 0, created_at text)');
 export { markDuties };
 
 const COLS = {
@@ -62,6 +65,7 @@ const COLS = {
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at', 'reply_to'],
   chat: ['id', 'member_id', 'role', 'text', 'photo', 'actions', 'cost', 'created_at'],
   antraege: ['id', 'member_id', 'kind', 'points', 'day', 'reason', 'proof', 'status', 'by', 'decided_by', 'decided_at', 'note', 'created_at'],
+  tage: ['id', 'member_id', 'day', 'goal', 'plan', 'created_at'],
 };
 const BOOLS = { members: ['active'], tasks: ['leicht', 'per_person', 'active', 'pflicht'] };
 const val = v => (v === undefined ? null : v === true ? 1 : v === false ? 0 : v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
@@ -98,6 +102,7 @@ export function out(table, r) {
   if (table === 'chat') { try { o.actions = JSON.parse(o.actions || '[]'); } catch { o.actions = []; } delete o.cost; } // was es kostet, sieht nur der Admin-Überblick
   if (table === 'members') { o.has_pin = !!o.pin_hash; delete o.pin_hash; }
   if (table === 'log') { o.can_undo = !!o.undo && !o.undone; delete o.undo; o.undone = !!o.undone; }
+  if (table === 'tage') return { id: o.id, goal: o.goal, plan: !!o.plan };
   return o;
 }
 
@@ -117,12 +122,18 @@ export function inviteCode() {
 
 /** Zustand der letzten 40 Tage, so wie ihn die gemeinsamen Regeln (shared/logic.js) erwarten. */
 export const since40 = () => new Date(Date.now() - 40 * 864e5).toISOString();
+/** Festgeschriebene Tagesregeln der letzten 70 Tage als { "Person|Tag": { goal, plan } }. */
+export function tageMap() {
+  const from = new Date(Date.now() - 70 * 864e5).toISOString().slice(0, 10);
+  return Object.fromEntries(q.all('select * from tage where day >= ?', from).map(r => [r.id, out('tage', r)]));
+}
 export function logicState() {
   return {
     members: q.all('select * from members order by sort, name').map(r => out('members', r)),
     tasks: q.all('select * from tasks').map(r => out('tasks', r)),
     entries: q.all("select * from entries where created_at >= ? or status in ('todo', 'started') order by created_at desc", since40()).map(r => out('entries', r)),
     settings: settings(),
+    tage: tageMap(),
   };
 }
 

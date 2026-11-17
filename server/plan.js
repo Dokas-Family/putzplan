@@ -3,7 +3,7 @@
 // So landet zum Beispiel die Küche nicht immer bei derselben Person.
 import { randomUUID, createHash } from 'node:crypto';
 import { q, row, out, insert, patch, remove, getMeta, setMeta, settings, logicState } from './db.js';
-import { emit, emitDel, emitSettings, now } from './core.js';
+import { emit, emitDel, emitSettings, emitAll, now } from './core.js';
 import { notify } from './push.js';
 import * as L from '../shared/logic.js';
 
@@ -128,6 +128,23 @@ export function takeBack(d = new Date(), memberId = null) {
     gone.push(r);
   }
   return gone;
+}
+/**
+ * Tagesregeln festschreiben (beim Start und jede Stunde, also kurz nach Mitternacht für den neuen Tag):
+ * Tagesziel und Dienstplan an/aus je Person für heute und alle fehlenden Tage der letzten zwei Wochen.
+ * Was schon festgeschrieben ist, bleibt. So gelten geänderte Regeln erst ab dem nächsten Tag.
+ */
+export function fixDays(d = new Date()) {
+  const s = settings(), members = q.all('select * from members').map(r => out('members', r)), iso = now();
+  for (let i = 14; i >= 0; i--) {
+    const day = L.noon(d, i);
+    for (const m of members) {
+      const id = L.tagKey(m.id, day);
+      if (row('tage', id)) continue;
+      insert('tage', { id, member_id: m.id, day: L.dKey(day), goal: L.dayGoal({ ...m, away_from: null, away_to: null }, day, s), plan: L.planOn(s, day) ? 1 : 0, created_at: iso });
+      emitAll({ t: 'tage', row: out('tage', row('tage', id)) });
+    }
+  }
 }
 /** Jemand hat heute doch frei (oder ist weg): seine Dienste gehen an die anderen. */
 export function freeUp(memberId, d = new Date()) {

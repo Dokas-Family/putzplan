@@ -1,5 +1,8 @@
 <script>
   // Chat mit Claude: Fragen, Nachweise mit Foto, Anträge. Admins sehen zusätzlich die Chats aller anderen (nur lesen).
+  // Symbole, die der Server zu erledigten Aktionen schickt (stehen hier, damit sie ins Symbol-Sprite kommen):
+  // 'star' 'send' 'repeat' 'clipboard-list' 'lightbulb' 'trash-2' 'user-minus' 'shuffle' 'eye' 'undo-2' 'tree-palm'
+  // 'triangle-alert' 'circle-check' 'circle-x' 'database' 'image-off' 'settings' 'rotate-cw'
   import { tick, untrack } from 'svelte';
   import Icon from '../parts/Icon.svelte';
   import { S, G, api, post, mem, mName, markChatSeen, setChatBusy } from '../lib/store.svelte.js';

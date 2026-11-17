@@ -6,7 +6,7 @@ import { match, sessionOf, collect, emit, Fail, STREAM, VERSION } from './core.j
 import { row, out, patch, photoFile, videoFile, saveVideo, delVideo, inviteCode, VIDEO, VIDEO_MAX } from './db.js';
 import { seedIfEmpty } from './seed.js';
 import { startJobs } from './push.js';
-import { initPlan, ensurePlan } from './plan.js';
+import { initPlan, ensurePlan, fixDays } from './plan.js';
 import { involved } from '../shared/logic.js';
 import './api.js';
 
@@ -141,6 +141,7 @@ createServer(async (req, res) => {
 }).listen(PORT, () => {
   const fresh = seedIfEmpty();
   initPlan();
+  fixDays();
   ensurePlan();
   startJobs();
   console.log(`Putzplan läuft auf Port ${PORT}`);

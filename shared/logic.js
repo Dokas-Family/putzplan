@@ -81,6 +81,24 @@ export function dayGoal(m, d, settings) {
   const min = m.role === 'kind' ? +(settings.ziel_klein ?? 6) : +(settings.ziel_gross ?? 10);
   return Math.max(Math.round(w * (+settings.tagesziel || 10)), min || 0);
 }
+/**
+ * Festgeschriebene Regeln eines Tages ("st.tage", Schlüssel "Person|JJJJ-MM-TT"): Tagesziel und ob der Dienstplan galt.
+ * Der Server schreibt sie zu Beginn jedes Tages fest. So gelten neue Regeln (Pensum, Tagesziel, Dienstplan an/aus)
+ * ab dem nächsten Tag und rechnen nie die Vergangenheit um, also auch keine Serie.
+ */
+export const tagKey = (id, d) => `${id}|${dKey(d)}`;
+const tagOf = (st, m, d) => st.tage?.[tagKey(m.id, d)];
+/** Tagesziel, das an diesem Tag gilt. Abwesend heißt immer: kein Ziel. */
+export function goalOf(st, m, d) {
+  if (isAway(m, d)) return 0;
+  const t = tagOf(st, m, d);
+  return t ? +t.goal || 0 : dayGoal(m, d, st.settings);
+}
+/** Galt an diesem Tag der Dienstplan? Für heute zählt die aktuelle Einstellung (Ausschalten wirkt sofort). */
+export function planFor(st, m, d, today = new Date()) {
+  const t = tagOf(st, m, d);
+  return t && dKey(d) < dKey(today) ? !!t.plan : planOn(st.settings, d);
+}
 export function personalTasksFor(st, m, d) {
   const out = [];
   for (const t of st.tasks) {
@@ -123,9 +141,10 @@ export const taskKey = title => String(title || '').toLowerCase().replace(/[^a-z
 
 /** Einmal pro Zustand bauen, danach sind Tagespunkte, Dienste und "gibt es schon einen Eintrag?" billig. */
 export function buildIndex(st) {
-  const day = new Map(), byKey = new Map(), redeemed = {}, duty = new Map(), open = new Map();
+  const day = new Map(), byKey = new Map(), redeemed = {}, duty = new Map(), open = new Map(), frei = new Set();
   const push = (map, k, e) => (map.get(k) || map.set(k, []).get(k)).push(e);
   for (const e of st.entries) {
+    if (e.task_id === 'frei' && e.status === 'done') frei.add(`${e.member_id}|${e.period}`);
     if (e.status !== 'rejected' && isDuty(e)) {
       push(duty, `${e.member_id}|${dutyDay(e)}`, e);
       if (isOpen(e)) push(open, e.member_id, e);
@@ -137,8 +156,10 @@ export function buildIndex(st) {
     const k = dKey(new Date(e.after_at));
     for (const [id, p] of Object.entries(shares(e))) day.set(`${id}|${k}`, (day.get(`${id}|${k}`) || 0) + p);
   }
-  return { day, byKey, redeemed, duty, open };
+  return { day, byKey, redeemed, duty, open, frei };
 }
+/** Hat die Person an diesem Tag frei bekommen (Admin, Antrag, königlicher Tag)? */
+export const hasFrei = (ix, id, d) => ix.frei.has(`${id}|${dKey(d)}`);
 export const entryFor = (ix, t, d, memberId) => ix.byKey.get(entryKey(t.id, periodOf(t, d), slotOf(t, memberId)));
 export const dayPoints = (ix, id, d) => ix.day.get(`${id}|${dKey(d)}`) || 0;
 /** Dienste einer Person für einen Tag. Für heute kommen ältere dazu, die noch offen sind (z. B. ein Wochendienst von gestern). */
@@ -160,29 +181,21 @@ export function dutyWeek(ix, id, today = new Date()) {
 /** Punktekonto: was an den letzten 35 Tagen über dem Tagesziel lag, minus Eingelöstes. */
 export function bank(ix, m, st, today = new Date()) {
   let earned = 0;
-  for (let i = 1; i <= 35; i++) { const d = noon(today, i); earned += Math.max(0, dayPoints(ix, m.id, d) - dayGoal(m, d, st.settings)); }
+  for (let i = 1; i <= 35; i++) { const d = noon(today, i); earned += Math.max(0, dayPoints(ix, m.id, d) - goalOf(st, m, d)); }
   return Math.max(0, earned - (ix.redeemed[m.id] || 0));
 }
 /**
- * Serie: Tage am Stück, die geschafft sind. Mit Dienstplan heißt das: alle Dienste erledigt (Tage ohne Dienste
- * zählen nicht mit und brechen nichts ab, die Serie beginnt frühestens mit dem Dienstplan). Ohne: Tagesziel erreicht.
+ * Serie: Tage am Stück, die geschafft sind. Jeder Tag nach seinen eigenen Regeln: mit Dienstplan alle Dienste
+ * erledigt, ohne das Tagesziel erreicht. Freie Tage und Tage ohne Dienste zählen nicht mit und brechen nichts ab.
+ * Heute zählt, sobald er geschafft ist; solange nicht, bricht er auch nichts ab.
  */
 export function streak(ix, m, st, today = new Date()) {
-  if (planOn(st.settings, today)) {
-    let n = dayState(st, ix, m, noon(today), today) === 'ok' ? 1 : 0;
-    for (let i = 1; i <= 60; i++) {
-      const d = noon(today, i);
-      if (!planOn(st.settings, d)) break;
-      const s = dayState(st, ix, m, d, today);
-      if (s === 'frei') continue;
-      if (s === 'ok') n++; else break;
-    }
-    return n;
-  }
   let n = 0;
-  const t = noon(today), g0 = dayGoal(m, t, st.settings);
-  if (g0 > 0 && dayPoints(ix, m.id, t) >= g0) n++;
-  for (let i = 1; i <= 35; i++) { const d = noon(today, i), g = dayGoal(m, d, st.settings); if (g <= 0) continue; if (dayPoints(ix, m.id, d) >= g) n++; else break; }
+  for (let i = 0; i <= 60; i++) {
+    const s = dayState(st, ix, m, noon(today, i), today);
+    if (s === 'ok') n++;
+    else if (s !== 'frei' && s !== 'now') break;
+  }
   return n;
 }
 function sumBy(st, match) {
@@ -214,15 +227,16 @@ export const royalTitle = m => ({ k: 'König', q: 'Königin' })[m.titel] || 'Maj
 export function dayState(st, ix, m, d, today = new Date(), since = '') {
   const k = dKey(d), tk = dKey(today);
   if (k > tk || k < since) return 'future'; // "since": Tage, bevor es überhaupt Einträge gab, bleiben leer
-  if (planOn(st.settings, d)) {
+  if (hasFrei(ix, m.id, d) || isAway(m, d)) return 'frei';
+  if (planFor(st, m, d, today)) {
     const ds = dutiesOn(ix, m.id, d, today), done = ds.filter(e => e.status === 'done').length;
     if (!ds.length) return 'frei';
     if (done === ds.length) return 'ok';
     if (k === tk) return 'now';
     return done ? 'teil' : 'miss';
   }
-  const g = dayGoal(m, d, st.settings), p = dayPoints(ix, m.id, d);
-  if (g <= 0 || st.entries.some(e => e.task_id === 'frei' && e.member_id === m.id && e.status === 'done' && e.period === k)) return 'frei';
+  const g = goalOf(st, m, d), p = dayPoints(ix, m.id, d);
+  if (g <= 0) return 'frei';
   if (p >= g) return 'ok';
   if (k === tk) return 'now';
   return p > 0 ? 'teil' : 'miss';

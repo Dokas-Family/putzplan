@@ -118,6 +118,29 @@ test('Dienstplan: Tag geschafft heißt alle Dienste erledigt, die Serie beginnt 
   assert.equal(L.taskKey('Spülmaschine einräumen, Tab rein & anmachen'), L.taskKey('Spülmaschine Einräumen'));
 });
 
+test('Festgeschriebene Tage: neue Regeln rechnen die Vergangenheit nicht um, die Serie läuft über den Start des Dienstplans', () => {
+  const today = day(2026, 11, 18); // erster Tag mit Dienstplan
+  const mia = { id: 'mia', role: 'mitglied', active: true, w_weekday: 1, w_weekend: 1 };
+  const pts = (id, back, points) => ({ id, task_id: 'x', member_id: 'mia', helpers: [], status: 'done', points, after_at: at(L.noon(today, back)), created_at: at(L.noon(today, back)), period: L.dKey(L.noon(today, back)), slot: '' });
+  const entries = [
+    { id: 'd', task_id: 'k', title: 'Küche', member_id: 'mia', created_by: 'plan', helpers: [], status: 'done', points: 3, created_at: at(today), after_at: at(today), period: L.dKey(today), slot: '' },
+    pts('a', 1, 5), pts('b', 2, 4), // damals reichten 3 Punkte
+    { id: 'f', task_id: 'frei', title: 'Frei', member_id: 'mia', helpers: [], status: 'done', points: 3, after_at: at(L.noon(today, 3)), period: L.dKey(L.noon(today, 3)), slot: 'f' },
+    pts('c', 4, 3),
+  ];
+  // heute gilt: mindestens 10 Punkte; festgeschrieben waren für die Tage davor 3
+  const tage = Object.fromEntries([1, 2, 3, 4, 5].map(i => [L.tagKey('mia', L.noon(today, i)), { goal: 3, plan: false }]));
+  const st = { members: [mia], tasks: [], settings: { ...L.DEFAULT_SETTINGS, tagesziel: 10, dienste: true, plan_start: '2026-11-18' }, entries, tage };
+  const ix = L.buildIndex(st);
+  assert.equal(L.goalOf(st, mia, L.noon(today, 1)), 3);
+  assert.equal(L.dayGoal(mia, L.noon(today, 1), st.settings), 10);
+  assert.equal(L.dayState(st, ix, mia, L.noon(today, 3), today), 'frei'); // freier Tag bricht nichts ab
+  assert.equal(L.dayState(st, ix, mia, L.noon(today, 5), today), 'miss');
+  assert.equal(L.streak(ix, mia, st, today), 4); // heute (Dienste) + 3 Tage nach den alten Regeln, der freie Tag zählt nicht mit
+  assert.equal(L.streak(ix, mia, { ...st, tage: {} }, today), 1); // ohne Festschreiben rechnete die App mit 10 nach
+  assert.equal(L.goalOf(st, { ...mia, away_from: '2026-11-17', away_to: '2026-11-17' }, L.noon(today, 1)), 0); // abwesend: kein Ziel
+});
+
 test('Wochensieger: wer in der Vorwoche vorne lag', () => {
   const today = day(2026, 11, 13);
   const members = [{ id: 'a', active: true, name: 'A' }, { id: 'b', active: true, name: 'B' }];
