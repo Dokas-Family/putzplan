@@ -179,22 +179,25 @@ function sqlTool(me, a, turn) {
   const sql = String(a.sql || '').trim().replace(/;\s*$/, ''), zweck = str(a.zweck, 160) || 'ohne Angabe';
   if (!sql) throw new Fail(400, 'Kein SQL');
   if (sql.replace(/'(?:[^']|'')*'/g, '').includes(';')) throw new Fail(400, 'Bitte nur eine Anweisung pro Aufruf');
-  // Erst als reine Abfrage versuchen: die Lese-Verbindung lässt nichts anderes zu
+  // Erst als reine Abfrage versuchen: die Lese-Verbindung lässt nichts anderes zu. Die Prüfung bleibt auch beim
+  // Ausführen an, denn SQLite bereitet eine Abfrage dabei manchmal neu vor.
   const r = readDb();
   r.setAuthorizer((code, a1, a2, dbName, view) => readCheck(me, code, a1, a2, view) ?? (READ_OK.has(code) || (code === SQ.SQLITE_PRAGMA && ['table_info', 'table_list', 'index_list'].includes(a1)) ? SQ.SQLITE_OK : SQ.SQLITE_DENY));
-  let read = null, readErr = null;
-  try { read = r.prepare(sql); } catch (e) { readErr = e; } finally { r.setAuthorizer(null); }
-  if (read) {
-    const rows = read.all();
+  let rows = null, readErr = null;
+  try { rows = r.prepare(sql).all(); } catch (e) { readErr = e; } finally { r.setAuthorizer(null); }
+  if (rows) {
+    // Doppelt hält besser: PIN-Hashes nie herausgeben, egal wie die Spalte heißt
+    for (const x of rows) for (const k of Object.keys(x)) if (typeof x[k] === 'string' && /^s1\$|^[0-9a-f]{64}$/.test(x[k]) && /pin|hash/i.test(k + sql)) x[k] = null;
     if (!rows.length) return 'Keine Zeilen.';
     let text = rows.slice(0, SQL_ROWS).map(x => JSON.stringify(x)).join('\n');
     if (text.length > 15000) text = text.slice(0, 15000) + '\n… (gekürzt, grenz die Abfrage ein)';
     return `${rows.length} Zeilen${rows.length > SQL_ROWS ? `, gezeigt die ersten ${SQL_ROWS}` : ''}:\n${text}`;
   }
   if (!/\b(insert|update|delete|replace)\b/i.test(sql)) throw new Fail(400, `Geht nicht: ${readErr?.message || 'unbekannter Fehler'}`);
-  // Schreiben: auf der Hauptverbindung, nur in erlaubte Tabellen, mit Rückweg über das Protokoll
+  // Schreiben: auf der Hauptverbindung, nur in erlaubte Tabellen, mit Rückweg über das Protokoll.
+  // Die Prüfung ist beim Vorbereiten und beim Ausführen an, dazwischen (Sicherungskopie, Punkte zählen) aus.
   const allowed = isAdmin(me) ? WRITE_ADMIN : WRITE_OTHERS, touched = new Set();
-  db.setAuthorizer((code, a1, a2, dbName, view) => {
+  const guard = () => db.setAuthorizer((code, a1, a2, dbName, view) => {
     const rd = code === SQ.SQLITE_READ ? (a1 === 'meta' ? SQ.SQLITE_DENY : readCheck(me, code, a1, a2, view)) : null;
     if (rd != null) return rd;
     if (code === SQ.SQLITE_INSERT || code === SQ.SQLITE_DELETE || code === SQ.SQLITE_UPDATE) {
@@ -205,6 +208,7 @@ function sqlTool(me, a, turn) {
     return READ_OK.has(code) ? SQ.SQLITE_OK : SQ.SQLITE_DENY;
   });
   let stmt;
+  guard();
   try { stmt = db.prepare(sql); }
   catch (e) { throw new Fail(403, `Geht nicht: ${e.message}. Schreiben darfst du hier nur in ${[...allowed].join(', ')}${isAdmin(me) ? '' : ' (Chat mit einem Nicht-Admin)'}.`); }
   finally { db.setAuthorizer(null); }
@@ -212,8 +216,10 @@ function sqlTool(me, a, turn) {
   let diff;
   db.exec('savepoint claude_sql');
   try {
-    stmt.run();
-    diff = tables.flatMap(t => changes(t, before[t], snap(t)));
+    guard();
+    try { stmt.run(); } catch (e) { throw new Fail(403, `Geht nicht: ${e.message}`); } finally { db.setAuthorizer(null); }
+    for (const t of touched) if (!before[t]) before[t] = new Map(); // nur möglich, wenn neu vorbereitet wurde: dann ist alles neu
+    diff = [...touched].flatMap(t => changes(t, before[t], snap(t)));
     if (diff.length > SQL_ROWS) throw new Fail(400, `Das wären ${diff.length} geänderte Zeilen auf einmal. Bitte enger fassen.`);
     if (w0) {
       const w1 = wealth(), gain = Object.keys(w1).filter(id => (w1[id] || 0) - (w0[id] || 0) > BONUS_MAX);
