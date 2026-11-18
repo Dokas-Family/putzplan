@@ -25,7 +25,7 @@ export const onDay = (t, d) => !!((+t.day || 0) & (1 << (isoDay(d) - 1)));
 export const daysOf = t => [1, 2, 3, 4, 5, 6, 7].filter(i => (+t.day || 0) & (1 << (i - 1)));
 export const ROLES = { admin: 'Admin', mitglied: 'Mitglied', kind: 'Kind' };
 export const REACTS = ['❤️', '👏', '😍', '🔥', '😂', '🤢', '🙈'];
-export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, claude_aktiv: true, claude_prueft: true, rooms: {}, dienst_regeln: {} };
+export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: false, claude_aktiv: true, claude_prueft: true, rooms: {}, dienst_regeln: {} };
 /**
  * Dienstplan-Regeln je Person (settings.dienst_regeln[personId]):
  * ohne = Bereiche, aus denen die Person nie Dienste bekommt (z. B. ['Küche']),

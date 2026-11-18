@@ -331,6 +331,8 @@ test('Übergangstür: alte Geräte kommen mit dem V1-Geheimcode herein, aber nur
 test('Dienstplan: verteilt fair, Kinder nur Leichtes, Extras erst nach den Diensten, frei gibt Dienste ab', async () => {
   const today = L.dKey(new Date());
   db.prepare("insert into meta (key, value) values ('plan_start', ?) on conflict (key) do update set value = excluded.value").run(JSON.stringify(today));
+  assert.equal((await admin.get('/api/state')).settings.extras_sperre, false); // Standard: Extras gehen auch mit Dienstplan
+  await admin.put('/api/settings', { ...(await admin.get('/api/state')).settings, extras_sperre: true });
   let r = await admin.post('/api/plan/redo');
   assert.ok(r.count > 0, 'es wurden Dienste verteilt');
   let st = await admin.get('/api/state');

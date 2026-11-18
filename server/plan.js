@@ -30,6 +30,12 @@ function people(st, d) {
  * Danach ändern Admins das unter Verwaltung → Regeln.
  */
 export function seedRegeln() {
+  // 18.11.2026: Extras für alle auch trotz Dienstplan (Dorinas Wunsch: wer Müll oder Dreck sieht, macht es schnell weg). Einmalig.
+  if (!getMeta('mig_extras_frei')) {
+    setMeta('settings', { ...getMeta('settings', {}), extras_sperre: false });
+    setMeta('mig_extras_frei', true);
+    emitSettings(settings());
+  }
   const raw = getMeta('settings', {});
   if (raw.dienst_regeln) return;
   const ms = q.all('select * from members').map(r => out('members', r)), by = n => ms.find(m => m.name?.trim().toLowerCase() === n);
