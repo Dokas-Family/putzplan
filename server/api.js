@@ -232,6 +232,7 @@ on('POST', '/api/entries/:id/takeover', 'member', ({ p, me }) => {
   if (from === me.id) throw new Fail(409, 'Das ist schon dein Dienst');
   if (e.status !== 'todo') throw new Fail(409, e.status === 'started' ? `${nameOf(from)} ist schon dran. Frag lieber, ob du mithelfen kannst.` : 'Dieser Dienst ist schon vorbei');
   if (!L.isDuty(e)) throw new Fail(400, 'Übernehmen geht nur bei Diensten');
+  checkBereich(me, e.task_id);
   patch('entries', e.id, { member_id: me.id, slot: e.task_id === 'adhoc' ? me.id : e.slot, fuer: e.fuer || from });
   notify(from, 'Dienst übernommen', `${me.name} macht „${e.title}“ für dich`);
   addLog(me, `übernimmt „${e.title}“ für ${nameOf(from)}`, [{ t: 'entries', id: e.id, patch: { member_id: from, slot: e.slot, fuer: e.fuer }, only: { status: 'todo' } }]);
@@ -465,6 +466,7 @@ on('POST', '/api/entries/:id/reassign', 'admin', ({ p, body, me }) => {
   if (e.status !== 'todo') throw new Fail(409, 'Schon angefangen oder vorbei, lässt sich nicht mehr umverteilen');
   if (!m.active) throw new Fail(400, 'Diese Person ist pausiert');
   if (m.id === e.member_id) return;
+  checkBereich(m, e.task_id);
   patch('entries', e.id, { member_id: m.id, slot: e.task_id === 'adhoc' ? m.id : e.slot });
   if (m.id !== me.id) notify(m.id, 'Neuer Dienst für dich', e.title);
   addLog(me, `hat „${e.title}“ von ${nameOf(e.member_id)} an ${m.name} gegeben`, [{ t: 'entries', id: e.id, patch: { member_id: e.member_id, slot: e.slot }, only: { status: 'todo' } }]);
@@ -490,6 +492,7 @@ on('POST', '/api/entries/:id/revoke', 'admin', ({ p, me }) => {
 on('POST', '/api/tasks/:id/assign', 'admin', ({ p, body, me }) => {
   const t = out('tasks', need('tasks', p.id, 'Aufgabe nicht gefunden')), m = member(body.member_id), d = new Date(), id = randomUUID();
   const period = L.periodOf(t, d), slot = L.slotOf(t, m.id);
+  checkBereich(m, t.id);
   if (q.get("select id from entries where task_id = ? and period = ? and slot = ? and status <> 'rejected'", t.id, period, slot)) throw new Fail(409, 'Die Aufgabe ist schon vergeben oder erledigt');
   insert('entries', { id, task_id: t.id, title: t.title, member_id: m.id, period, slot, status: 'todo', points: 0, created_at: now(), created_by: me.id, helpers: [] });
   if (m.id !== me.id) notify(m.id, 'Neue Aufgabe für dich', t.title);
@@ -541,6 +544,23 @@ on('POST', '/api/members/:id/reset-pin', 'admin', ({ p, me }) => {
   addLog(me, `hat die PIN von ${m.name} zurückgesetzt`);
   emit('members', row('members', m.id));
 });
+/** Dienstplan-Regeln je Person prüfen: nur bekannte Personen, Bereiche als Text, Faktor zwischen 0,3 und 3. */
+function cleanRegeln(v, old) {
+  if (!v || typeof v !== 'object') return old || {};
+  const ids = new Set(q.all('select id from members').map(r => r.id)), res = {};
+  for (const [id, r] of Object.entries(v)) {
+    if (!ids.has(id) || !r || typeof r !== 'object') continue;
+    const ohne = [...new Set((Array.isArray(r.ohne) ? r.ohne : []).map(x => str(x, 40)).filter(Boolean))].slice(0, 30);
+    const mehr = Math.round(Math.min(3, Math.max(0.3, +r.mehr || 1)) * 10) / 10;
+    if (ohne.length || r.anzahl || mehr !== 1) res[id] = { ohne, anzahl: !!r.anzahl, mehr };
+  }
+  return res;
+}
+/** Bereich gesperrt? (z. B. Iris und Küche) */
+function checkBereich(m, taskId) {
+  const t = taskId && row('tasks', taskId);
+  if (t && !L.darfBereich(settings(), m.id, t.room)) throw new Fail(400, `${m.name} bekommt keine Dienste im Bereich ${t.room} (Regel unter Verwaltung → Regeln)`);
+}
 on('PUT', '/api/settings', 'admin', ({ body, me }) => {
   const s = settings(), rooms = {};
   for (const [k, v] of Object.entries(body.rooms && typeof body.rooms === 'object' ? body.rooms : s.rooms || {}).slice(0, 60)) rooms[str(k, 40)] = str(v, 30);
@@ -550,6 +570,7 @@ on('PUT', '/api/settings', 'admin', ({ body, me }) => {
     koch_regel: body.koch_regel ?? s.koch_regel ? true : false, review_first: body.review_first ?? s.review_first ? true : false, erinnerung: body.erinnerung ?? s.erinnerung ? true : false, rooms,
     dienste: body.dienste ?? s.dienste ? true : false, extras_sperre: body.extras_sperre ?? s.extras_sperre ? true : false,
     claude_aktiv: body.claude_aktiv ?? s.claude_aktiv ? true : false, claude_prueft: body.claude_prueft ?? s.claude_prueft ? true : false,
+    dienst_regeln: cleanRegeln(body.dienst_regeln, s.dienst_regeln),
   };
   setMeta('settings', next);
   if (next.dienste && !s.dienste) { setMeta('plan_start', null); initPlan(); ensurePlan(); } // wieder eingeschaltet: neu beginnen

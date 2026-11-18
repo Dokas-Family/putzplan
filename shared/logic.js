@@ -25,7 +25,25 @@ export const onDay = (t, d) => !!((+t.day || 0) & (1 << (isoDay(d) - 1)));
 export const daysOf = t => [1, 2, 3, 4, 5, 6, 7].filter(i => (+t.day || 0) & (1 << (i - 1)));
 export const ROLES = { admin: 'Admin', mitglied: 'Mitglied', kind: 'Kind' };
 export const REACTS = ['❤️', '👏', '😍', '🔥', '😂', '🤢', '🙈'];
-export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, claude_aktiv: true, claude_prueft: true, rooms: {} };
+export const DEFAULT_SETTINGS = { min_minutes: 2, koch_regel: true, tagesziel: 10, ziel_gross: 10, ziel_klein: 6, review_first: false, erinnerung: true, dienste: true, extras_sperre: true, claude_aktiv: true, claude_prueft: true, rooms: {}, dienst_regeln: {} };
+/**
+ * Dienstplan-Regeln je Person (settings.dienst_regeln[personId]):
+ * ohne = Bereiche, aus denen die Person nie Dienste bekommt (z. B. ['Küche']),
+ * anzahl = nach Anzahl der Dienste verteilen statt nach Minuten (jeder Dienst zählt gleich),
+ * mehr = Faktor fürs Pensum im Dienstplan (1 normal, 1,5 heißt anderthalb mal so viele Dienste).
+ */
+export const dienstRegel = (settings, id) => {
+  const r = settings?.dienst_regeln?.[id] || {};
+  return { ohne: Array.isArray(r.ohne) ? r.ohne : [], anzahl: !!r.anzahl, mehr: +r.mehr > 0 ? +r.mehr : 1 };
+};
+export const darfBereich = (settings, id, room) => !room || !dienstRegel(settings, id).ohne.includes(room);
+export function dienstRegelText(settings, id) {
+  const r = dienstRegel(settings, id), bits = [];
+  if (r.ohne.length) bits.push(`nie ${r.ohne.join(', ')}`);
+  if (r.anzahl) bits.push('nach Anzahl statt Minuten');
+  if (r.mehr !== 1) bits.push(`Pensum mal ${String(r.mehr).replace('.', ',')}`);
+  return bits.join(', ');
+}
 export const DEFAULT_RAIN = '🎉✨⭐🧽💪🌈';
 /** Claude als System-Konto: schreibt Kommentare und reagiert, ist aber keine Person im Haushalt. */
 export const SYSTEM = { id: 'claude', name: 'Claude', emoji: '✨', role: 'system', active: false, system: true };

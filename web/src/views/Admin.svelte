@@ -25,8 +25,15 @@
   const day = k => k.split('-').reverse().slice(0, 2).join('.') + '.';
 
   // Regeln: erst lokal ändern, dann speichern
-  let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings });
-  const dirty = $derived(['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre', 'claude_aktiv', 'claude_prueft'].some(k => rules[k] !== S.settings[k]));
+  let rules = $state({ ziel_gross: 10, ziel_klein: 6, ...S.settings, dienst_regeln: JSON.parse(JSON.stringify(S.settings.dienst_regeln || {})) });
+  // Dienstplan-Regeln je Person
+  const rg = id => L.dienstRegel(rules, id);
+  const setRg = (id, ch) => { rules.dienst_regeln = { ...rules.dienst_regeln, [id]: { ...rg(id), ...ch } }; };
+  const toggleRoom = (id, room) => { const o = rg(id).ohne; setRg(id, { ohne: o.includes(room) ? o.filter(x => x !== room) : [...o, room] }); };
+  const MEHR = [[0.7, 'weniger'], [1, 'normal'], [1.3, 'mehr'], [1.6, 'viel mehr']];
+  const norm = o => JSON.stringify(Object.keys(o || {}).sort().map(id => { const r = L.dienstRegel({ dienst_regeln: o }, id); return [id, [...r.ohne].sort(), r.anzahl, r.mehr]; }).filter(([, o2, a, m]) => o2.length || a || m !== 1));
+  const regelnDirty = $derived(norm(rules.dienst_regeln) !== norm(S.settings.dienst_regeln));
+  const dirty = $derived(regelnDirty || ['tagesziel', 'ziel_gross', 'ziel_klein', 'min_minutes', 'review_first', 'koch_regel', 'erinnerung', 'dienste', 'extras_sperre', 'claude_aktiv', 'claude_prueft'].some(k => rules[k] !== S.settings[k]));
   const saveRules = async () => (await tryDo(() => put('/settings', rules))) && toast('Regeln gespeichert');
   let infos = $state(S.claudeInfos);
   async function saveInfos() {
@@ -117,6 +124,20 @@
       {#if rules.claude_aktiv}<div class="row"><span class="icb"><Icon name="badge-check" /></span><span class="grow"><b>Claude darf abhaken</b><small>Was eindeutig passt, gilt als geprüft. Zurückgeben oder ablehnen bleibt bei euch.</small></span>{@render sw(rules.claude_prueft, () => (rules.claude_prueft = !rules.claude_prueft), 'Claude darf abhaken')}</div>{/if}
       <div class="row"><span class="icb"><Icon name="bell" /></span><span class="grow"><b>Erinnerung um 17 Uhr</b><small>{rules.dienste ? 'wenn noch Dienste offen sind' : 'wenn noch Punkte zum Tagesziel fehlen'}</small></span>{@render sw(rules.erinnerung, () => (rules.erinnerung = !rules.erinnerung), 'Erinnerung')}</div>
     </section>
+    {#if rules.dienste}
+      <div class="sec-h"><h2><Icon name="calendar-check" size={16} />Dienste je Person</h2></div>
+      <section class="card list">
+        {#each S.members.filter(m => m.active && !m.system) as m (m.id)}
+          {@const r = rg(m.id)}
+          <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+            <div class="row" style="padding:0"><span class="grow"><b>{m.emoji} {m.name}</b><small>{r.anzahl ? 'Verteilt nach Anzahl der Dienste' : 'Verteilt nach Minuten'}</small></span>{@render sw(r.anzahl, () => setRg(m.id, { anzahl: !r.anzahl }), `${m.name} nach Anzahl`)}</div>
+            <div class="pick" style="margin:6px 0"><small class="hint" style="align-self:center">Dienste:</small>{#each MEHR as [v, t] (v)}<button class:on={r.mehr === v} onclick={() => setRg(m.id, { mehr: v })}>{t}</button>{/each}</div>
+            <div class="pick"><small class="hint" style="align-self:center">Nie:</small>{#each allRooms(S.tasks, S.settings).filter(x => x !== 'Eigenes Zimmer') as room (room)}<button class:on={r.ohne.includes(room)} onclick={() => toggleRoom(m.id, room)}><Icon name={roomOf(room, S.settings).icon} size={14} /> {room}</button>{/each}</div>
+          </div>
+        {/each}
+        <p class="hint" style="margin:8px 0 0">„Nie“: Dienste aus dem Bereich bekommt die Person weder vom Dienstplan noch durch Übernehmen oder Umverteilen. Gilt ab dem nächsten Verteilen („neu verteilen“ oder morgen früh).</p>
+      </section>
+    {/if}
     <button class="btn wide" disabled={!dirty} onclick={saveRules}>Regeln speichern</button>
     <div class="sec-h"><h2><Icon name="sparkles" size={16} />Was Claude über euch wissen soll</h2></div>
     <section class="card">

@@ -24,6 +24,22 @@ function people(st, d) {
   const k = L.dKey(d);
   return st.members.filter(m => m.active && L.weight(m, d) > 0 && !st.entries.some(e => e.task_id === 'frei' && e.member_id === m.id && e.status === 'done' && e.period === k));
 }
+/**
+ * Einmalig (wenn es noch keine Dienstplan-Regeln gibt): Dorinas Wünsche vom 18.11.2026 eintragen.
+ * Iris bekommt nie Küche, Mia und Iris werden nach Anzahl verteilt, Mia ist tagsüber zuhause und bekommt etwas mehr.
+ * Danach ändern Admins das unter Verwaltung → Regeln.
+ */
+export function seedRegeln() {
+  const raw = getMeta('settings', {});
+  if (raw.dienst_regeln) return;
+  const ms = q.all('select * from members').map(r => out('members', r)), by = n => ms.find(m => m.name?.trim().toLowerCase() === n);
+  const regeln = {}, iris = by('iris'), mia = by('mia');
+  if (iris) regeln[iris.id] = { ohne: ['Küche'], anzahl: true, mehr: 1 };
+  if (mia) regeln[mia.id] = { ohne: [], anzahl: true, mehr: 1.3 };
+  setMeta('settings', { ...raw, dienst_regeln: regeln });
+  emitSettings(settings());
+}
+
 /** Dienste, die heute dran oder liegengeblieben sind und die noch niemand hat oder erledigt hat. */
 function dueTasks(st, d, ix) {
   return st.tasks.filter(t => t.active && t.pflicht && !t.per_person && !t.proposed_by && L.activeOn(t, d) && (L.dueOn(t, d) || L.overdueInPeriod(t, d)) && !L.entryFor(ix, t, d, null));
@@ -37,14 +53,18 @@ export function makePlan(d = new Date(), st = logicState()) {
   const k = L.dKey(d), ix = L.buildIndex(st);
   const ppl = people(st, d), tasks = dueTasks(st, d, ix).sort((a, b) => b.minutes - a.minutes || a.id.localeCompare(b.id));
   if (!ppl.length || !tasks.length) return [];
-  const w = Object.fromEntries(ppl.map(m => [m.id, L.weight(m, d)]));
-  const load = Object.fromEntries(ppl.map(m => [m.id, 0])); // Minuten, die jemand heute schon hat
+  const rg = Object.fromEntries(ppl.map(m => [m.id, L.dienstRegel(st.settings, m.id)]));
+  const w = Object.fromEntries(ppl.map(m => [m.id, L.weight(m, d) * rg[m.id].mehr])); // „mehr“: diese Person darf mehr Dienste bekommen
+  // Wer nach Anzahl verteilt wird, dem zählt jeder Dienst gleich viel: die durchschnittliche Dauer aller Dienste.
+  const avg = st.tasks.filter(t => t.active && t.pflicht && !t.per_person).reduce((a, t, i, all) => a + (+t.minutes || 5) / all.length, 0) || 10;
+  const cost = (id, t) => (rg[id]?.anzahl ? avg : +t?.minutes || 5);
+  const load = Object.fromEntries(ppl.map(m => [m.id, 0])); // Minuten (bzw. Anzahl mal Durchschnitt), die jemand heute schon hat
   const hist = Object.fromEntries(ppl.map(m => [m.id, { min: 0, task: {}, room: {} }])); // die letzten 7 Tage
   const tasksById = new Map(st.tasks.map(t => [t.id, t])), since = L.dKey(L.noon(d, 7));
   for (const e of st.entries) {
     if (e.status === 'rejected' || L.ADMIN_KINDS.has(e.task_id)) continue;
-    const t = tasksById.get(e.task_id), mins = +t?.minutes || 5;
-    if (L.isDuty(e) && L.isOpen(e) && L.dutyDay(e) === k && load[e.member_id] != null) load[e.member_id] += mins;
+    const t = tasksById.get(e.task_id);
+    if (L.isDuty(e) && L.isOpen(e) && L.dutyDay(e) === k && load[e.member_id] != null) load[e.member_id] += cost(e.member_id, t);
     if (e.status !== 'done') continue; // Verpasstes zählt nicht als „schon gemacht“, sonst käme man so drum herum
     const day = L.dKey(new Date(e.after_at));
     if (day < since || day >= k) continue;
@@ -52,7 +72,7 @@ export function makePlan(d = new Date(), st = logicState()) {
     for (const id of team) {
       const h = hist[id];
       if (!h) continue;
-      h.min += mins / team.length;
+      h.min += cost(id, t) / team.length;
       const tk = L.taskKey(e.title);
       h.task[tk] = (h.task[tk] || 0) + 1;
       if (t?.room) h.room[t.room] = (h.room[t.room] || 0) + 1;
@@ -60,13 +80,13 @@ export function makePlan(d = new Date(), st = logicState()) {
   }
   const made = [], todayTask = Object.fromEntries(ppl.map(m => [m.id, {}]));
   for (const t of tasks) {
-    const cands = ppl.filter(m => m.role !== 'kind' || t.leicht);
+    const cands = ppl.filter(m => (m.role !== 'kind' || t.leicht) && !rg[m.id].ohne.includes(t.room));
     if (!cands.length) continue; // bleibt offen, jeder darf
     const tk = L.taskKey(t.title);
     let best = null, bestScore = Infinity;
     for (const m of cands) {
       const h = hist[m.id];
-      const score = (load[m.id] + (+t.minutes || 5)) / w[m.id] // heute nach Pensum gleich verteilt
+      const score = (load[m.id] + cost(m.id, t)) / w[m.id] // heute nach Pensum gleich verteilt
         + (0.3 * h.min) / 7 / w[m.id] // wer zuletzt viel gemacht hat, bekommt etwas weniger
         + 5 * Math.min(3, h.task[tk] || 0) // dieselbe Aufgabe wandert weiter …
         + 25 * (todayTask[m.id][tk] || 0) // … und dreimal Spülmaschine am selben Tag geht nicht an eine Person
@@ -77,7 +97,7 @@ export function makePlan(d = new Date(), st = logicState()) {
     todayTask[best.id][tk] = (todayTask[best.id][tk] || 0) + 1;
     const e = { id: randomUUID(), task_id: t.id, title: t.title, member_id: best.id, period: L.periodOf(t, d), slot: '', status: 'todo', points: 0, created_at: d.toISOString(), created_by: 'plan', helpers: [] };
     try { insert('entries', e); } catch (err) { if (/UNIQUE/i.test(err.message)) continue; throw err; }
-    load[best.id] += +t.minutes || 5;
+    load[best.id] += cost(best.id, t);
     st.entries.push(out('entries', row('entries', e.id)));
     made.push(row('entries', e.id));
   }

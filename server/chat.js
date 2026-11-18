@@ -119,6 +119,8 @@ function lage(me) {
     const days = [1, 2, 3, 4, 5, 6].map(i => { const x = L.noon(d, i); return `${dayLabel(x)} ${STATE_TEXT[L.dayState(st, ix, m, x, d)] || '-'}`; });
     bits.push(`Serie ${L.streak(ix, m, st, d)} Tage (heute ${STATE_TEXT[L.dayState(st, ix, m, d, d)]}; davor ${days.join(', ')})`);
     if (L.isAway(m, d)) bits.push('gerade abwesend');
+    const rt = L.dienstRegelText(st.settings, m.id);
+    if (rt) bits.push(`Dienstplan-Regel: ${rt}`);
     return `- ${m.emoji || ''} ${m.name} (${ROLE[m.role] || 'Erwachsen'}): ${bits.join(', ')}`;
   });
   const mine = st.entries.filter(e => L.isOpen(e) && L.involved(e, me.id));
@@ -327,7 +329,7 @@ Hinweise: Zeiten (created_at, before_at, after_at, at) sind ISO in UTC, Deutschl
     art: S('Was', { enum: ['bonus', 'warn', 'frei'] }), person: S('Für wen'), punkte: N('Bei bonus und warn: 1 bis 50'), grund: S('Grund, steht als Titel'), tag: S('Bei frei: der freie Tag als JJJJ-MM-TT (bis 6 Tage zurück, bis 14 voraus)'),
   }, ['art', 'person']),
   T('antrag_entscheiden', 'Nur im Chat mit Admins: einen offenen Antrag annehmen oder ablehnen, eine Meldung als erledigt abhaken (annehmen).', { id: S('Kennung des Antrags'), annehmen: { type: 'boolean', description: 'true = annehmen' }, notiz: S('Kurze Begründung') }, ['id', 'annehmen']),
-  T('regeln_aendern', 'Nur im Chat mit Admins: Regeln der App ändern. Nur die Werte angeben, die sich ändern, z. B. {"dienste": false} oder {"tagesziel": 5}. Schlüssel: min_minutes, tagesziel, ziel_gross, ziel_klein, koch_regel, review_first, erinnerung, dienste, extras_sperre, claude_aktiv, claude_prueft.', {
+  T('regeln_aendern', 'Nur im Chat mit Admins: Regeln der App ändern. Nur die Werte angeben, die sich ändern, z. B. {"dienste": false} oder {"tagesziel": 5}. Schlüssel: min_minutes, tagesziel, ziel_gross, ziel_klein, koch_regel, review_first, erinnerung, dienste, extras_sperre, claude_aktiv, claude_prueft, dienst_regeln. dienst_regeln sind die dauerhaften Dienstplan-Regeln je Person: {"<Personenkennung>": {"ohne": ["Küche"], "anzahl": true, "mehr": 1.3}}; ohne = Bereiche, aus denen die Person nie Dienste bekommt (auch nicht per Übernehmen oder Umverteilen), anzahl = nach Anzahl der Dienste statt nach Minuten verteilen, mehr = Faktor fürs Pensum (1 normal). Immer das ganze Objekt mit allen Personen schicken, es ersetzt das alte.', {
     aenderungen: { type: 'object', description: 'Die zu ändernden Werte' },
   }, ['aenderungen']),
   T('app_neustarten', 'Nur im Chat mit Admins und nur, wenn sie es wollen: den Dienst der App neu starten (dauert etwa 10 bis 20 Sekunden, alle müssen danach kurz neu laden). Höchstens alle 10 Minuten.', { grund: S('Warum') }, ['grund']),

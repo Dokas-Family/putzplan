@@ -366,6 +366,25 @@ test('Dienstplan: verteilt fair, Kinder nur Leichtes, Extras erst nach den Diens
   assert.ok(duties().length >= before - 1, 'die Dienste sind nicht verschwunden, nur umverteilt');
 });
 
+test('Dienstplan-Regeln je Person: Bereiche ausschließen, nach Anzahl, mehr Dienste', async () => {
+  let st = await admin.get('/api/state');
+  const r = await admin.put('/api/settings', { ...st.settings, dienst_regeln: { [ADMIN]: { ohne: ['Küche', 'Küche'], anzahl: true, mehr: 9 }, gibtsnicht: { anzahl: true }, [LILY]: { ohne: [], anzahl: false, mehr: 1 } } });
+  assert.equal(r.status, 200);
+  st = await admin.get('/api/state');
+  assert.deepEqual(st.settings.dienst_regeln, { [ADMIN]: { ohne: ['Küche'], anzahl: true, mehr: 3 } }); // aufgeräumt
+  await admin.post('/api/plan/redo');
+  st = await admin.get('/api/state');
+  const tasks = new Map(st.tasks.map(t => [t.id, t]));
+  const mine = st.entries.filter(e => e.created_by === 'plan' && e.status === 'todo' && e.member_id === ADMIN);
+  assert.ok(mine.length > 0, 'Admin hat noch Dienste');
+  assert.ok(mine.every(e => tasks.get(e.task_id)?.room !== 'Küche'), 'keine Küche für Admin');
+  const kueche = st.tasks.find(t => t.room === 'Küche' && t.active && !t.per_person);
+  const res = await admin.post(`/api/tasks/${kueche.id}/assign`, { member_id: ADMIN });
+  assert.equal(res.status, 400);
+  assert.match(res.error, /Küche/);
+  await admin.put('/api/settings', { ...st.settings, dienst_regeln: {} });
+});
+
 test('Video zum Foto: nur Beteiligte, nur echte Videos, abspielbar in Stücken', async () => {
   const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(88, 7)]);
   const path = `/api/entries/${entry.id}/video?step=after`, head = { 'Content-Type': 'video/mp4', 'X-Putzplan': '1' };
