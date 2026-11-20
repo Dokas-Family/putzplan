@@ -66,6 +66,8 @@
 {:else if f.freq === 'weekly'}
   <label class="f" for="t-day">An welchem Tag?</label>
   <select id="t-day" class="inp" bind:value={f.day}>{#each [1, 2, 3, 4, 5, 6, 7] as i (i)}<option value={i}>{DAYS[i]}</option>{/each}</select>
+{:else if f.freq === 'einmal'}
+  <p class="hint" style="margin-top:6px">Ist ab sofort offen, bis jemand sie erledigt. Danach verschwindet sie von selbst (unter „Aufgaben“ lässt sie sich wieder einschalten).</p>
 {:else if f.freq === 'monthly'}
   <label class="f" for="t-day">Ab welchem Tag im Monat? (1 bis 28)</label>
   <input id="t-day" class="inp" type="number" min="1" max="28" bind:value={f.day} />

@@ -19,7 +19,7 @@ export const fromKey = k => { const [y, m, d] = k.split('-').map(Number); return
 
 export const DAYS = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 export const DAYS_SHORT = ['', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', tage: 'an bestimmten Tagen', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende' };
+export const FREQ = { daily: 'täglich', weekdays: 'Mo–Fr', tage: 'an bestimmten Tagen', weekly: '1x pro Woche', monthly: '1x im Monat', weekend: 'am Wochenende', einmal: 'einmalig' };
 /** „An bestimmten Tagen“: die Tage stehen als Bits in "day" (Mo = 1, Di = 2, Mi = 4 … So = 64). */
 export const onDay = (t, d) => !!((+t.day || 0) & (1 << (isoDay(d) - 1)));
 export const daysOf = t => [1, 2, 3, 4, 5, 6, 7].filter(i => (+t.day || 0) & (1 << (i - 1)));
@@ -59,7 +59,7 @@ export const ptsOf = t => (t?.points != null && t.points !== '' ? +t.points : Ma
 // ---------- Fälligkeit ----------
 export function periodOf(t, d) {
   if (t.id === 'adhoc') return dKey(d);
-  switch (t.freq) { case 'weekly': case 'weekend': return weekKey(d); case 'monthly': return mKey(d); default: return dKey(d); }
+  switch (t.freq) { case 'weekly': case 'weekend': return weekKey(d); case 'monthly': return mKey(d); case 'einmal': return 'einmal'; default: return dKey(d); }
 }
 export function activeOn(t, d) {
   const wd = isoDay(d);
@@ -71,7 +71,7 @@ export function activeOn(t, d) {
 export function dueOn(t, d) {
   const wd = isoDay(d);
   switch (t.freq) {
-    case 'daily': return true;
+    case 'daily': case 'einmal': return true; // einmalig: offen, bis es erledigt ist, danach schaltet es sich aus
     case 'weekdays': return wd <= 5;
     case 'weekend': return wd >= 6;
     case 'tage': return onDay(t, d);

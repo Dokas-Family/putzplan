@@ -304,7 +304,7 @@ Hinweise: Zeiten (created_at, before_at, after_at, at) sind ISO in UTC, Deutschl
   }, ['art']),
   T('aufgabe_vorschlagen', 'Eine neue Aufgabe für den Plan vorschlagen. Im Chat mit Admins wird sie gleich angelegt, sonst entscheiden die Admins.', {
     titel: S('Name der Aufgabe'), raum: S('Raum, z. B. Küche'), minuten: N('Wie lange ungefähr'), punkte: N('Punkte 1 bis 30'),
-    haeufigkeit: S('Wie oft', { enum: ['daily', 'weekdays', 'weekly', 'monthly', 'weekend'] }), dienst: { type: 'boolean', description: 'Dienst (wird verteilt) statt Extra' },
+    haeufigkeit: S('Wie oft', { enum: ['daily', 'weekdays', 'weekly', 'monthly', 'weekend', 'einmal'] }), dienst: { type: 'boolean', description: 'Dienst (wird verteilt) statt Extra' },
   }, ['titel']),
   // Reparieren und verwalten (Claude hat alle Rechte)
   T('eintrag_entfernen', 'Einen noch nicht angefangenen Eintrag von einer Liste nehmen (zum Beispiel doppelt eingetragen).', { id: S('Kennung') }, ['id']),

@@ -219,6 +219,23 @@ test('Extra-Aufgaben und Mithelfen', async () => {
   assert.equal((await mia.post('/api/redeem')).status, 400); // kein Guthaben
 });
 
+test('Einmalige Aufgabe: offen bis erledigt, dann aus, wieder einschalten macht sie neu', async () => {
+  await admin.put('/api/settings', { ...(await admin.get('/api/state')).settings, min_minutes: 0 });
+  const id = crypto.randomUUID();
+  assert.equal((await admin.put('/api/tasks/' + id, { title: 'Tannenbaum aufbauen', room: 'Wohnzimmer', freq: 'einmal', minutes: 60, points: 10, active: true, pflicht: false })).status, 200);
+  let st = await admin.get('/api/state');
+  assert.equal(st.tasks.find(t => t.id === id).freq, 'einmal');
+  const e = entryOf(await mia.post('/api/entries/start', { task_id: id, ...photo }));
+  assert.equal(e.period, 'einmal');
+  await mia.post(`/api/entries/${e.id}/finish`, photo);
+  st = await admin.get('/api/state');
+  assert.equal(st.tasks.find(t => t.id === id).active, false, 'nach dem Erledigen aus');
+  await admin.post(`/api/tasks/${id}/active`, { active: true });
+  st = await admin.get('/api/state');
+  assert.notEqual(st.entries.find(x => x.id === e.id).period, 'einmal', 'Altes ist archiviert');
+  assert.equal(entryOf(await lily.post('/api/entries/start', { task_id: id, ...photo })).status, 'started'); // wieder offen
+});
+
 test('Aufgaben verwalten: nur Admins, alle anderen schlagen vor', async () => {
   let r = await admin.put('/api/tasks/test-task', { title: 'Keller fegen', room: 'Keller', freq: 'weekly', day: 6, minutes: 20, points: 4 });
   assert.equal(r.changes.find(c => c.t === 'tasks').row.active, true);

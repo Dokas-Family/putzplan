@@ -151,6 +151,20 @@ on('POST', '/api/entries/start', 'member', ({ body, me }) => {
   emit('entries', e);
   return { id };
 });
+/** Einmalige Aufgaben (z. B. Tannenbaum aufbauen) schalten sich nach dem Erledigen aus, nach einem Ablehnen wieder an. */
+function einmalAus(t, an) {
+  if (!t || t.freq !== 'einmal' || t.per_person || !!t.active === an) return;
+  patch('tasks', t.id, { active: an });
+  emit('tasks', row('tasks', t.id));
+}
+/** Eine einmalige Aufgabe wird wieder eingeschaltet (z. B. nächstes Jahr wieder Tannenbaum): das alte Erledigte wandert ins Archiv, sie ist wieder offen. */
+function einmalNeu(t) {
+  if (!t || t.freq !== 'einmal') return;
+  for (const r of q.all("select id from entries where task_id = ? and period = 'einmal' and status = 'done'", t.id)) {
+    patch('entries', r.id, { period: 'einmal-' + r.id.slice(0, 8) });
+    emitEntry(r.id);
+  }
+}
 on('POST', '/api/entries/:id/finish', 'member', ({ p, body, me }) => {
   const e = entry(p.id);
   if (e.member_id !== me.id) throw new Fail(403, 'Nur wer das Vorher-Foto gemacht hat, darf abhaken');
@@ -161,6 +175,7 @@ on('POST', '/api/entries/:id/finish', 'member', ({ p, body, me }) => {
   const points = (e.task_id === 'adhoc' ? (+e.points || 2) : t ? L.ptsOf(t) : 1) + (e.fuer ? L.FUER_BONUS : 0); // für jemand anderen: Bonus obendrauf
   patch('entries', e.id, { status: 'done', after_photo: savePhoto(e.id + '-n', body.photo, body.thumb), after_at: now(), points, review: null, review_note: null });
   emitEntry(e.id);
+  einmalAus(t, false);
   soon(e.id); // Claude schaut gleich drauf
   return { points };
 });
@@ -380,6 +395,7 @@ on('PUT', '/api/tasks/:id', 'member', ({ p, body, me }) => {
     notify(admins(), 'Neuer Vorschlag', `${me.name}: ${f.title}`);
   } else {
     save('tasks', { id: p.id, ...f, proposed_by: old?.proposed_by && !f.active ? old.proposed_by : null });
+    if (old && f.active && !old.active) einmalNeu({ ...f, id: p.id });
     addLog(me, `hat die Aufgabe „${f.title}“ ${old ? 'geändert' : 'angelegt'}`);
   }
   emit('tasks', row('tasks', p.id));
@@ -387,6 +403,7 @@ on('PUT', '/api/tasks/:id', 'member', ({ p, body, me }) => {
 on('POST', '/api/tasks/:id/active', 'admin', ({ p, body, me }) => {
   const t = need('tasks', p.id), active = !!body.active;
   patch('tasks', t.id, { active, proposed_by: null });
+  if (active && !t.active) einmalNeu(t);
   addLog(me, `hat die Aufgabe „${t.title}“ ${active ? 'eingeschaltet' : 'ausgeschaltet'}`, [{ t: 'tasks', id: t.id, patch: { active: !!t.active, proposed_by: t.proposed_by } }]);
   if (t.proposed_by && active) notify(t.proposed_by, 'Vorschlag angenommen', t.title);
   emit('tasks', row('tasks', t.id));
@@ -411,6 +428,8 @@ on('POST', '/api/entries/:id/review', 'admin', ({ p, body, me }) => {
     addLog(me, `hat „${e.title}“ von ${who} zum Nachbessern zurückgegeben${note ? ': ' + note : ''}`, [{ t: 'entries', id: e.id, patch: before }]);
   } else if (body.verdict === 'reject') {
     patch('entries', e.id, { status: 'rejected', note: 'abgelehnt' });
+    const tk = row('tasks', e.task_id);
+    if (tk) einmalAus(out('tasks', tk), true);
     notify(team, 'Nochmal ran!', `„${e.title}“ wurde abgelehnt. Die Aufgabe ist wieder offen.`);
     addLog(me, `hat „${e.title}“ von ${who} abgelehnt (−${e.points} P)`, [{ t: 'entries', id: e.id, patch: { status: 'done', note: null } }]);
   } else throw new Fail(400, 'Unbekanntes Urteil');
