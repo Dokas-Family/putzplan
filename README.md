@@ -1,6 +1,6 @@
 # Familien-Putzplan V2
 
-Vorher-Foto, putzen, Nachher-Foto, Haken dran. Mit Punkten, Rangliste, Reaktionen und einer Übersicht für Admins.
+Vorher-Foto, putzen, Nachher-Foto, Haken dran. Mit Punkten, Rangliste, Reaktionen, Krankmeldung und einem Claude-Chat. Reiter: Heute, Familie, Fotos, Claude, Ich.
 
 V2 läuft auf einem eigenen Server: ein Node-Dienst liefert die App aus, prüft alle Regeln (Rollen, PIN, Punkte) und schickt Änderungen live an alle offenen Geräte. Die Daten liegen in einer SQLite-Datei, die Fotos als Dateien daneben. Das Konzept dazu steht in [KONZEPT-V2.md](KONZEPT-V2.md).
 
@@ -107,9 +107,9 @@ Rückgängig machen ließe sich das mit den SQL-Dateien aus dem Branch `v1-archi
 Seit dem 18.11.2026 verteilt der Server jeden Morgen um 4 Uhr die Dienste (`server/plan.js`). Ob eine Aufgabe ein Dienst oder ein Extra ist, steht bei der Aufgabe (beim Einführen: ab 3 Punkten Dienst, darunter Extra). Verteilt wird nach Pensum der Person (Gewicht Mo–Fr und Wochenende); wer eine Aufgabe oder einen Bereich in den letzten 7 Tagen oft gemacht hat, ist seltener wieder dran, und gleiche Aufgaben am selben Tag gehen an verschiedene Personen. Kinder bekommen nur Aufgaben mit „leicht“.
 
 - Um 7 Uhr bekommt jeder seine Dienste als Benachrichtigung, um 17 Uhr eine Erinnerung, wenn noch welche offen sind.
-- Was am Ende des Zeitraums nicht angefangen ist, gilt als verpasst und steht bei den Admins in der Übersicht.
+- Was am Ende des Zeitraums nicht angefangen ist, gilt als verpasst und steht bei den Admins unter „Familie“.
 - Wer heute frei bekommt, den freien Tag als König wählt oder abwesend gemeldet wird, gibt seine Dienste ab; sie gehen an die anderen.
-- Admins können Dienste weitergeben und den Tag neu verteilen (Übersicht › Dienstplan heute).
+- Admins können Dienste weitergeben und den Tag neu verteilen (Familie › Dienstplan heute).
 - Mit der Regel „Erst Dienste, dann Extras“ geht Kleinkram erst, wenn die eigenen Dienste erledigt sind.
 - Ausschalten unter Verwaltung › Regeln. Dann gilt wieder das Tagesziel in Punkten.
 
@@ -129,7 +129,15 @@ docker exec -i putzplan node server/claude.js - < kommentare.json
 
 Die Datei enthält eine Liste wie `[{ "entry_id": "…", "text": "…" }, { "entry_id": "…", "emoji": "👏" }]`.
 
-Mit `ANTHROPIC_API_KEY` sieht sich Claude neue Einträge selbst an. Aus Videos schneidet der Server dafür bis zu sechs Standbilder (ffmpeg im Container), weil die API keine Videos annimmt.
+Mit `ANTHROPIC_API_KEY` sieht sich Claude neue Einträge selbst an. Aus Videos schneidet der Server dafür bis zu sechs Standbilder (ffmpeg im Container), weil die API keine Videos annimmt. Abgehakt wird nur, was auf den Fotos eindeutig erledigt ist, alles Unklare bleibt für die Admins unter „Familie › Fotos prüfen“. In Kommentaren antwortet Claude nur den Personen, um deren Beitrag es geht.
+
+### Krank melden
+
+Unter „Ich“, unten auf „Heute“ oder im Chat meldet sich jede Person selbst krank, ab heute 1 bis 3 Tage. Admins können andere krank melden (Familie › Person antippen). Ein Krankentag ist ein freier Tag mit Vermerk „krank“: Die Dienste gehen an die anderen, die Serie bleibt stehen, die Admins bekommen eine Benachrichtigung und können es im Protokoll zurücknehmen. „Wieder gesund“ nimmt die Tage ab morgen zurück.
+
+### Fehlerprotokoll
+
+Fehler landen zusätzlich in `data/fehler.log` (bleibt bei Neustarts und Updates erhalten, höchstens etwa 1 MB). Ansehen: `docker exec putzplan tail -50 /data/fehler.log`.
 
 ### Serie und festgeschriebene Tage
 
@@ -143,18 +151,22 @@ Im Reiter „Claude“ kann jede Person mit Claude schreiben (Opus 5.5, Aufwand 
 
 - Im Chat mit Admins tut Claude, was sie wollen: auch belohnen, abmahnen, frei geben (bis 6 Tage zurück), Regeln ändern, die App neu starten (höchstens alle 10 Minuten).
 - Im Chat mit allen anderen gilt der Schutz gegen Mogeln: Reparieren ja (falscher Tag, Doppeltes, kaputte Serie), aber nichts, was jemandem mehr als 3 Punkte bringt. Die Datenbank prüft das selbst und rollt sonst zurück. Schreiben dort nur in `entries`, `reactions`, `tage`, fremde Chats lesen geht nicht.
-- Selbst vergibt Claude dort nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag. Alles andere wird ein Antrag. Die Admins sehen ihn in der Übersicht unter „Von Claude“ und nehmen an oder lehnen ab.
+- Selbst vergibt Claude dort nur Kleines: bis 3 Bonuspunkte für nachgewiesene Extra-Arbeit (Foto im Chat oder Eintrag mit Fotos), höchstens 5 pro Person und Tag. Alles andere wird ein Antrag. Die Admins sehen ihn unter „Familie“ bei „Von Claude“ und nehmen an oder lehnen ab.
 - Mogelversuche meldet Claude den Admins (ebenfalls unter „Von Claude“). Die gemeldete Person sieht die Meldung nicht.
 - Claude kann den Quellcode lesen (Werkzeug `quellcode`, nur lesen, nie `data/` oder `.env`). Deshalb liegen `web/src`, `test`, `scripts` und die README auch im Image.
 - Antworten zeigt die App als Markdown (`web/src/lib/md.js`, ohne Bibliothek, maskiert alles): Tabellen, Codeblöcke mit Kopieren, `@Name` mit Emoji, App-Symbole `:flame:`, Fotos `![Text](foto:NAME)` und Diagramme als Codeblock `balken`, `fortschritt`, `kacheln`.
 - Im Chat mit Admins darf Claude auch Chat-Nachrichten und Protokollzeilen ändern oder löschen.
-- Offene Dienste anderer lassen sich übernehmen (im Chat oder unter „Wer hat heute was?“): Punkte plus 1 Bonuspunkt.
+- Admins können im Chat Bilder aus der Galerie schicken (Screenshots). Sie zählen nie als Beweis.
+- Fotos entfernt Claude nur auf ausdrückliche Bitte. Sie liegen dann 30 Tage im Papierkorb und lassen sich zurückholen („hol das Foto zurück“), danach löscht sie der nächtliche Wecker.
+- Claude antwortet immer: Sind die Runden mit Werkzeugen aufgebraucht oder kommt eine Antwort ohne Text, fragt die App einmal ohne Werkzeuge nach einer Antwort.
+- Markdown und Symbole funktionieren auch in den eigenen Nachrichten.
+- Offene Dienste anderer lassen sich übernehmen (im Chat oder unter „Familie“ die Person antippen): Punkte plus 1 Bonuspunkt.
 - Admins sehen unter „Alle Chats“ jeden Verlauf und was er diesen Monat gekostet hat. Alle anderen sehen keine Beträge.
 - Grenze: 10 € API-Kosten pro Person und Monat, Admins ohne Grenze (`CHAT_LIMIT_EUR` in der `.env` ändert das).
 
 ## PIN vergessen
 
-Auf dem Anmeldeschirm gibt es unter dem Ziffernfeld „PIN vergessen?“. Das meldet sich bei den Admins: in der Übersicht steht dann „PIN vergessen: Name“, ein Tipp setzt die PIN zurück. Danach legt die Person beim nächsten Öffnen eine neue fest. Admins können eine PIN auch jederzeit über die Person zurücksetzen.
+Auf dem Anmeldeschirm gibt es unter dem Ziffernfeld „PIN vergessen?“. Das meldet sich bei den Admins: unter „Familie“ steht dann „PIN vergessen: Name“, ein Tipp setzt die PIN zurück. Danach legt die Person beim nächsten Öffnen eine neue fest. Admins können eine PIN auch jederzeit über die Person zurücksetzen.
 
 Hat die einzige Admin-Person ihre PIN vergessen, hilft der Befehl am Server:
 

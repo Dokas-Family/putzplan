@@ -1,9 +1,10 @@
 // Push-Benachrichtigungen und der stündliche Wecker (Waschtag, Tagesziel).
 import * as webpush from 'web-push';
-import { q, getMeta, setMeta, logicState } from './db.js';
+import { q, getMeta, setMeta, logicState, purgeChatPhotos } from './db.js';
 import { isoDay, isAway, goalOf, dayPoints, buildIndex, planOn, dutiesOn, isOpen } from '../shared/logic.js';
 import { ensurePlan, tell, fixDays } from './plan.js';
 import { sweep } from './reviewer.js';
+import { logError } from './core.js';
 
 let keys = getMeta('vapid');
 if (!keys) { keys = webpush.generateVAPIDKeys(); setMeta('vapid', keys); }
@@ -27,6 +28,7 @@ function hourly(d) {
   fixDays(d); // kurz nach Mitternacht: Regeln für den neuen Tag festschreiben
   ensurePlan(d); // ab 4 Uhr: Dienstplan für den Tag
   sweep(); // Claude holt nach, was noch nicht angesehen ist
+  if (d.getHours() === 3) purgeChatPhotos(); // Papierkorb der Chat-Fotos nach 30 Tagen leeren
   const st = logicState(), h = d.getHours(), wd = isoDay(d), tomorrow = wd % 7 + 1;
   const active = st.members.filter(m => m.active && !isAway(m, d));
   if (h === 7) for (const m of active) if (+m.waschtag === wd) notify(m.id, 'Heute ist dein Waschtag!', 'Wäschekorb runterbringen nicht vergessen.');
@@ -57,6 +59,6 @@ export function startJobs() {
     const d = new Date();
     if (d.getHours() === last) return;
     last = d.getHours();
-    try { hourly(d); } catch (e) { console.error('Wecker:', e); }
+    try { hourly(d); } catch (e) { logError('Wecker', e, String(e?.stack || '').split('\n')[1]?.trim()); }
   }, 60e3).unref();
 }

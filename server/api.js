@@ -83,7 +83,7 @@ on('POST', '/api/pin-help', 'device', ({ body }) => {
   if (Date.now() - (helpAsked.get(m.id) || 0) < 10 * 60e3) return; // nicht öfter als alle 10 Minuten Bescheid geben
   helpAsked.set(m.id, Date.now());
   patch('members', m.id, { pin_help: now() });
-  notify(admins().filter(a => a !== m.id), 'PIN vergessen', `${m.name} braucht eine neue PIN. In der Übersicht zurücksetzen.`);
+  notify(admins().filter(a => a !== m.id), 'PIN vergessen', `${m.name} braucht eine neue PIN. Unter „Familie“ zurücksetzen.`);
   emit('members', row('members', m.id));
 });
 on('POST', '/api/logout', 'device', ({ sess }) => { q.run('update sessions set member_id = null where id = ?', sess.id); });
@@ -464,6 +464,47 @@ on('POST', '/api/entries/reward', 'admin', ({ body, me }) => {
   emitEntry(id);
   if (kind === 'frei' && period === L.dKey(new Date())) freeUp(m.id); // heute frei: die Dienste gehen an die anderen
 });
+
+// ---------- Krank melden ----------
+/**
+ * Krank melden: jeder für sich selbst, Admins auch für andere. Ab heute 1 bis 3 Tage. Zählt wie ein freier Tag
+ * (Vermerk „krank“): Die Dienste gehen an die anderen, die Serie bleibt stehen. Die Admins bekommen Bescheid und
+ * können es im Protokoll zurücknehmen. „Wieder gesund“ nimmt die Tage ab morgen zurück.
+ */
+const spanText = ds => (ds.length === 1 ? dayText(ds[0]) : `${dayText(ds[0])} bis ${dayText(ds.at(-1))}`);
+on('POST', '/api/krank', 'member', ({ body, me }) => {
+  const other = body.member_id && body.member_id !== me.id;
+  if (other && me.role !== 'admin') throw new Fail(403, 'Krank melden kannst du nur dich selbst');
+  const m = out('members', member(other ? body.member_id : me.id)), days = int(body.days, 1, L.KRANK_TAGE, 1);
+  const today = L.noon(), st = { settings: settings(), tage: tageMap() }, made = [], undo = [];
+  for (let i = 0; i < days; i++) {
+    const d = L.noon(today, -i), k = L.dKey(d);
+    if (q.get("select id from entries where task_id = 'frei' and member_id = ? and period = ? and status = 'done'", m.id, k)) continue;
+    const id = randomUUID();
+    insert('entries', { id, task_id: 'frei', title: 'Krank', note: 'krank', member_id: m.id, period: k, slot: id, status: 'done', points: L.goalOf(st, m, d) || 1, after_at: d.toISOString(), created_at: now(), created_by: me.id, helpers: [] });
+    emitEntry(id);
+    made.push(d);
+    undo.push({ t: 'entries', id, patch: { status: 'rejected' } });
+  }
+  if (!made.length) throw new Fail(409, 'Für diese Tage ist schon frei oder krank eingetragen');
+  const span = spanText(made);
+  addLog(me, other ? `hat ${m.name} krank gemeldet: ${span}` : `hat sich krank gemeldet: ${span}`, undo);
+  notify(admins().filter(x => x !== me.id && x !== m.id), `${m.name} ist krank 🤒`, `${span}. Die Dienste gehen an die anderen.`);
+  if (other) notify(m.id, 'Gute Besserung 🤒', `Du bist krank gemeldet: ${span}. Deine Dienste machen die anderen.`);
+  if (made.some(d => L.dKey(d) === L.dKey(today))) freeUp(m.id); // heute krank: die Dienste gehen an die anderen
+  return { days: made.map(L.dKey) };
+});
+on('POST', '/api/gesund', 'member', ({ body, me }) => {
+  const other = body.member_id && body.member_id !== me.id;
+  if (other && me.role !== 'admin') throw new Fail(403, 'Das geht nur für dich selbst');
+  const m = member(other ? body.member_id : me.id), k = L.dKey(new Date());
+  const rows = q.all("select * from entries where task_id = 'frei' and note = 'krank' and member_id = ? and period > ? and status = 'done'", m.id, k);
+  if (!rows.length) throw new Fail(409, 'Ab morgen ist nichts krank eingetragen. Heute bleibt, wie es ist.');
+  for (const r of rows) { patch('entries', r.id, { status: 'rejected' }); emitEntry(r.id); }
+  addLog(me, `${other ? `meldet ${m.name}` : 'ist'} wieder gesund (${rows.length} ${rows.length === 1 ? 'Tag' : 'Tage'} zurückgenommen)`, rows.map(r => ({ t: 'entries', id: r.id, patch: { status: 'done' } })));
+  return { count: rows.length };
+});
+
 /** Admins: was Claude über die Familie wissen soll (Arbeitszeiten, Schule, wer geschont werden soll). Nur für Admins sichtbar. */
 on('PUT', '/api/claude-infos', 'admin', ({ body, me }) => {
   const text = String(body.text ?? '').trim().slice(0, 3000);

@@ -121,11 +121,17 @@ export function planFor(st, m, d, today = new Date()) {
   const t = tagOf(st, m, d);
   return t && dKey(d) < dKey(today) ? !!t.plan : planOn(st.settings, d);
 }
+/**
+ * Aufgaben „für jeden“, die heute bei der Person stehen. Nicht bei Pensum 0 („keine Aufgaben“, z. B. Dorina:
+ * Fenster putzen stand bei ihr und ließ sich nicht wegmachen) und nicht aus Bereichen, die ihre Dienstplan-Regel ausschließt.
+ */
 export function personalTasksFor(st, m, d) {
   const out = [];
+  if (weight(m, d) <= 0) return out;
   for (const t of st.tasks) {
     if (!t.active || !t.per_person || !activeOn(t, d)) continue;
     if (m.role === 'kind' && !t.leicht) continue;
+    if (!darfBereich(st.settings, m.id, t.room)) continue;
     out.push(t);
   }
   if (+m.waschtag === isoDay(d)) out.unshift(WASCH);
@@ -163,10 +169,10 @@ export const taskKey = title => String(title || '').toLowerCase().replace(/[^a-z
 
 /** Einmal pro Zustand bauen, danach sind Tagespunkte, Dienste und "gibt es schon einen Eintrag?" billig. */
 export function buildIndex(st) {
-  const day = new Map(), byKey = new Map(), redeemed = {}, duty = new Map(), open = new Map(), frei = new Set();
+  const day = new Map(), byKey = new Map(), redeemed = {}, duty = new Map(), open = new Map(), frei = new Set(), krank = new Set();
   const push = (map, k, e) => (map.get(k) || map.set(k, []).get(k)).push(e);
   for (const e of st.entries) {
-    if (e.task_id === 'frei' && e.status === 'done') frei.add(`${e.member_id}|${e.period}`);
+    if (e.task_id === 'frei' && e.status === 'done') { frei.add(`${e.member_id}|${e.period}`); if (e.note === 'krank') krank.add(`${e.member_id}|${e.period}`); }
     if (e.status !== 'rejected' && isDuty(e)) {
       push(duty, `${e.member_id}|${dutyDay(e)}`, e);
       if (isOpen(e)) push(open, e.member_id, e);
@@ -178,10 +184,13 @@ export function buildIndex(st) {
     const k = dKey(new Date(e.after_at));
     for (const [id, p] of Object.entries(shares(e))) day.set(`${id}|${k}`, (day.get(`${id}|${k}`) || 0) + p);
   }
-  return { day, byKey, redeemed, duty, open, frei };
+  return { day, byKey, redeemed, duty, open, frei, krank };
 }
-/** Hat die Person an diesem Tag frei bekommen (Admin, Antrag, königlicher Tag)? */
+/** Hat die Person an diesem Tag frei bekommen (Admin, Antrag, königlicher Tag, krank)? */
 export const hasFrei = (ix, id, d) => ix.frei.has(`${id}|${dKey(d)}`);
+/** Krank gemeldet: ein freier Tag mit Vermerk „krank“ (Dienste gehen an die anderen, die Serie bleibt). */
+export const isKrank = (ix, id, d) => ix.krank.has(`${id}|${dKey(d)}`);
+export const KRANK_TAGE = 3; // so viele Tage am Stück kann man sich selbst krank melden
 export const entryFor = (ix, t, d, memberId) => ix.byKey.get(entryKey(t.id, periodOf(t, d), slotOf(t, memberId)));
 export const dayPoints = (ix, id, d) => ix.day.get(`${id}|${dKey(d)}`) || 0;
 /** Dienste einer Person für einen Tag. Für heute kommen ältere dazu, die noch offen sind (z. B. ein Wochendienst von gestern). */

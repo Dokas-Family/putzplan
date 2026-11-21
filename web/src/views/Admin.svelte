@@ -52,7 +52,7 @@
 <div class="narrow">
   <div class="top">
     <h1 class="grow">Verwaltung</h1>
-    <button class="btn sec sm" onclick={() => { S.tab = 'uebersicht'; scrollTo(0, 0); }}><Icon name="layout-dashboard" size={16} />Übersicht</button>
+    <button class="btn sec sm" onclick={() => { S.tab = 'familie'; scrollTo(0, 0); }}><Icon name="arrow-left" size={16} />Familie</button>
   </div>
   <div class="seg">
     {#each [['aufgaben', 'Aufgaben'], ['familie', 'Familie'], ['regeln', 'Regeln'], ['protokoll', 'Protokoll']] as [k, l] (k)}<button class:on={tab === k} onclick={() => (tab = k)}>{l}</button>{/each}

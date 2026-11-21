@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { join, extname, normalize } from 'node:path';
-import { match, sessionOf, collect, emit, Fail, STREAM, VERSION } from './core.js';
+import { match, sessionOf, collect, emit, Fail, STREAM, VERSION, logError } from './core.js';
 import { row, out, patch, photoFile, videoFile, saveVideo, delVideo, inviteCode, VIDEO, VIDEO_MAX } from './db.js';
 import { seedIfEmpty } from './seed.js';
 import { startJobs } from './push.js';
@@ -134,7 +134,7 @@ createServer(async (req, res) => {
     return file(req, res, path);
   } catch (e) {
     const status = e.status || 500;
-    if (status === 500) console.error(e);
+    if (status === 500) logError(`${req.method} ${String(req.url).split('?')[0]}`, e, String(e?.stack || '').split('\n')[1]?.trim());
     if (res.headersSent) return res.end();
     json(res, status, { error: status === 500 ? 'Da ist etwas schiefgelaufen' : e.message });
   }

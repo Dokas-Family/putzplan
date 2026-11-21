@@ -75,6 +75,18 @@ export async function resetPin(m) {
   if (!confirm(`PIN von ${m.name} zurücksetzen? Beim nächsten Öffnen legt ${m.name} eine neue fest.`)) return;
   if (await tryDo(() => post(`/members/${m.id}/reset-pin`))) toast(`PIN zurückgesetzt. ${m.name} kann jetzt eine neue festlegen.`);
 }
+/** Krank melden (sich selbst, Admins auch andere): ab heute 1 bis 3 Tage. */
+export async function krank(days, memberId = S.meId) {
+  let res;
+  if (await tryDo(async () => { res = await post('/krank', { days, member_id: memberId }); })) {
+    toast(memberId === S.meId ? 'Gute Besserung! 🤒 Deine Dienste machen heute die anderen.' : `${mName(memberId)} ist krank gemeldet.`, 4000);
+    return res;
+  }
+}
+/** Wieder gesund: Krankentage ab morgen zurücknehmen. */
+export async function gesund(memberId = S.meId) {
+  if (await tryDo(() => post('/gesund', { member_id: memberId }))) toast(memberId === S.meId ? 'Schön, dass es dir besser geht! 💪' : `${mName(memberId)} ist wieder gesund gemeldet.`);
+}
 export async function redeem() {
   let res;
   if (await tryDo(async () => { res = await post('/redeem'); })) { rain('💰🪙✨😎'); toast(`${res.amount} Punkte eingelöst. Tagesziel geschafft!`); }

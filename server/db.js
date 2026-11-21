@@ -54,6 +54,8 @@ db.exec(`
   create table if not exists antraege (id text primary key, member_id text, kind text, points integer, day text, reason text, proof text, status text default 'offen',
     by text, decided_by text, decided_at text, note text, created_at text);
 `);
+// Papierkorb für Chat-Fotos: entfernte Fotos bleiben 30 Tage wiederherstellbar, dann löscht sie der nächtliche Wecker
+if (!hasCol('chat', 'photo_weg')) db.exec('alter table chat add column photo_weg text; alter table chat add column weg_at text;');
 // Festgeschriebene Regeln je Person und Tag (Tagesziel, galt der Dienstplan?). Kennung "Person|JJJJ-MM-TT".
 // Neue Regeln gelten so erst ab dem nächsten Tag und rechnen nie die Vergangenheit (und damit keine Serie) um.
 db.exec('create table if not exists tage (id text primary key, member_id text, day text, goal integer, plan integer default 0, created_at text)');
@@ -64,7 +66,7 @@ const COLS = {
   tasks: ['id', 'title', 'room', 'freq', 'day', 'minutes', 'points', 'leicht', 'per_person', 'active', 'proposed_by', 'pflicht'],
   entries: ['id', 'task_id', 'title', 'member_id', 'period', 'slot', 'status', 'before_photo', 'before_at', 'after_photo', 'after_at', 'points', 'note', 'helpers', 'created_by', 'created_at', 'review', 'review_note', 'before_video', 'after_video', 'ai', 'pending', 'fuer'],
   reactions: ['id', 'entry_id', 'member_id', 'emoji', 'text', 'created_at', 'reply_to'],
-  chat: ['id', 'member_id', 'role', 'text', 'photo', 'actions', 'cost', 'created_at'],
+  chat: ['id', 'member_id', 'role', 'text', 'photo', 'actions', 'cost', 'created_at', 'photo_weg', 'weg_at'],
   antraege: ['id', 'member_id', 'kind', 'points', 'day', 'reason', 'proof', 'status', 'by', 'decided_by', 'decided_at', 'note', 'created_at'],
   tage: ['id', 'member_id', 'day', 'goal', 'plan', 'created_at'],
 };
@@ -100,7 +102,7 @@ export function out(table, r) {
     try { o.pending = JSON.parse(o.pending || '[]'); } catch { o.pending = []; }
     if (!Array.isArray(o.pending)) o.pending = [];
   }
-  if (table === 'chat') { try { o.actions = JSON.parse(o.actions || '[]'); } catch { o.actions = []; } delete o.cost; } // was es kostet, sieht nur der Admin-Überblick
+  if (table === 'chat') { try { o.actions = JSON.parse(o.actions || '[]'); } catch { o.actions = []; } delete o.cost; delete o.photo_weg; delete o.weg_at; } // was es kostet, sieht nur der Admin-Überblick
   if (table === 'members') { o.has_pin = !!o.pin_hash; delete o.pin_hash; }
   if (table === 'log') { o.can_undo = !!o.undo && !o.undone; delete o.undo; o.undone = !!o.undone; }
   if (table === 'tage') return { id: o.id, goal: o.goal, plan: !!o.plan };
@@ -163,6 +165,14 @@ export function savePhoto(name, photo, thumb) {
 export function delPhoto(name) {
   if (!name || !SAFE.test(name)) return;
   for (const f of [photoFile(name), photoFile(name, true)]) if (existsSync(f)) rmSync(f, { force: true });
+}
+/** Chat-Fotos, die seit über 30 Tagen im Papierkorb liegen, endgültig löschen. */
+export function purgeChatPhotos() {
+  const cut = new Date(Date.now() - 30 * 864e5).toISOString();
+  for (const r of q.all('select id, photo_weg from chat where photo_weg is not null and weg_at < ?', cut)) {
+    delPhoto(r.photo_weg);
+    q.run('update chat set photo_weg = null, weg_at = null where id = ?', r.id);
+  }
 }
 
 // ---------- Videos (freiwillig zum Foto dazu) ----------

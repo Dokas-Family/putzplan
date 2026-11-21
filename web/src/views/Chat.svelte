@@ -50,7 +50,7 @@
     if ((!t && !shot) || sending || busy) return;
     sending = true;
     try {
-      await post('/chat', { text: t, ...(shot ? { photo: shot.photo, thumb: shot.thumb } : {}) });
+      await post('/chat', { text: t, ...(shot ? { photo: shot.photo, thumb: shot.thumb, galerie: !!shot.galerie } : {}) });
       text = ''; shot = null;
       grow();
       await bottom();
@@ -61,6 +61,28 @@
     const img = await open(Camera, { label: 'Foto für Claude', kind: 'beweis' }, true);
     if (img) shot = { photo: img.photo, thumb: img.thumb };
   }
+  // Admins: Bild aus der Galerie (z. B. ein Screenshot). Zählt nie als Beweis, das weiß Claude.
+  let picker = $state();
+  async function pick(ev) {
+    const f = ev.currentTarget.files?.[0];
+    ev.currentTarget.value = '';
+    if (!f) return;
+    try {
+      const bmp = await createImageBitmap(f);
+      const draw = max => {
+        const sc = Math.min(1, max / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
+        cv.width = Math.round(bmp.width * sc); cv.height = Math.round(bmp.height * sc);
+        const g = cv.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); // durchsichtige Screenshots nicht schwarz
+        g.drawImage(bmp, 0, 0, cv.width, cv.height);
+        return cv;
+      };
+      const big = draw(1600);
+      let q = 0.85, photo = big.toDataURL('image/jpeg', q);
+      while (photo.length * 0.75 > 850_000 && q > 0.4) { q -= 0.12; photo = big.toDataURL('image/jpeg', q); }
+      shot = { photo, thumb: draw(480).toDataURL('image/jpeg', 0.6), galerie: true };
+    } catch { toast('Das Bild ließ sich nicht öffnen'); }
+  }
   function key(e) {
     if (e.key === 'Enter' && !e.shiftKey && !matchMedia('(pointer: coarse)').matches) { e.preventDefault(); send(); }
   }
@@ -69,7 +91,7 @@
   // Anzeige: Claudes Antworten mit Markdown (Personen mit Emoji, Fotos aus der App, Chat-Fotos nur aus diesem Chat)
   const mdCtx = $derived.by(() => {
     const own = new Set(msgs.map(m => m.photo).filter(Boolean));
-    return { people: new Map(S.members.map(m => [m.name.toLowerCase(), m])), photoOk: name => !name.startsWith('c-') || own.has(name) };
+    return { people: new Map(S.members.map(m => [m.name.toLowerCase(), m])), photoOk: name => !/^[cg]-/.test(name) || own.has(name) };
   });
   /** Klicks in Claudes Antworten: Foto groß ansehen, Code kopieren. */
   function mdClick(e) {
@@ -144,8 +166,7 @@
             {#if m.photo}
               <button class="cphoto" onclick={() => open(ChatPhoto, { name: m.photo })} aria-label="Foto groß ansehen"><img src="/photos/{m.photo}.t.jpg" alt="Foto" loading="lazy" /></button>
             {/if}
-            {#if m.text && m.role === 'user'}<p>{m.text}</p>
-            {:else if m.text}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div class="md" onclick={mdClick}>{@html md(m.text, mdCtx)}</div>{/if}
+            {#if m.text}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div class="md" onclick={mdClick}>{@html md(m.text, mdCtx)}</div>{/if}
             {#if m.actions?.length}
               <div class="cacts">{#each m.actions as a, j (j)}<span class="chip c-brand"><Icon name={a.icon || 'check'} size={13} />{a.text}</span>{/each}</div>
             {/if}
@@ -166,10 +187,14 @@
           <p class="hint">Claude ist noch nicht eingerichtet.</p>
         {:else}
           {#if shot}
-            <div class="cshot"><img src={shot.thumb} alt="Dein Foto" /><span class="grow">Foto kommt mit</span><button class="icb" onclick={() => (shot = null)} aria-label="Foto entfernen"><Icon name="x" size={16} /></button></div>
+            <div class="cshot"><img src={shot.thumb} alt="Dein Foto" /><span class="grow">{shot.galerie ? 'Bild aus der Galerie kommt mit' : 'Foto kommt mit'}</span><button class="icb" onclick={() => (shot = null)} aria-label="Foto entfernen"><Icon name="x" size={16} /></button></div>
           {/if}
           <div class="cin">
             <button class="icb" onclick={snap} aria-label="Foto machen" disabled={sending}><Icon name="camera" size={18} /></button>
+            {#if G.admin}
+              <button class="icb" onclick={() => picker.click()} aria-label="Bild aus der Galerie" title="Bild aus der Galerie (nur Admins)" disabled={sending}><Icon name="image" size={18} /></button>
+              <input bind:this={picker} type="file" accept="image/*" onchange={pick} hidden />
+            {/if}
             <textarea bind:this={box} bind:value={text} oninput={grow} onkeydown={key} rows="1" maxlength="2000" placeholder={busy ? 'Claude schreibt …' : 'Schreib Claude …'}></textarea>
             <button class="btn sm send" onclick={() => send()} disabled={sending || busy || (!text.trim() && !shot)} aria-label="Senden"><Icon name="send-horizontal" size={18} /></button>
           </div>

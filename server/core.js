@@ -1,6 +1,22 @@
 // Kleiner Router, Sitzungen (Cookie), PIN-Prüfung und der Live-Kanal (Server-Sent Events).
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { q, row, out } from './db.js';
+import { appendFileSync, statSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import { q, row, out, DATA } from './db.js';
+
+/**
+ * Fehler dauerhaft festhalten (data/fehler.log, übersteht Neustarts und Updates, höchstens ~1 MB mit einer alten Datei).
+ * Zusätzlich wie bisher auf der Konsole.
+ */
+export function logError(where, err, extra = '') {
+  const msg = `${new Date().toISOString()} ${where}: ${err?.status ? err.status + ' ' : ''}${err?.message || err}${extra ? ' | ' + extra : ''}\n`;
+  console.error(msg.trim());
+  try {
+    const f = join(DATA, 'fehler.log');
+    try { if (statSync(f).size > 512_000) renameSync(f, f + '.alt'); } catch {}
+    appendFileSync(f, msg);
+  } catch {}
+}
 
 export class Fail extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 /** Stand des Codes, der gerade läuft (kurze Git-Kennung, beim Bauen gesetzt). */

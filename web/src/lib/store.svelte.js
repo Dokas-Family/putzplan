@@ -52,7 +52,8 @@ const calc = $derived.by(() => {
       duties, dutiesDone: duties.filter(e => e.status === 'done').length, dutyWeek: plan ? L.dutyWeek(ix, m.id, d) : null,
       // ohne Dienstplan: altes Tagesziel in Punkten und Konto
       goal: plan ? 0 : L.goalOf(st, m, d), goalPts: L.dayPoints(ix, m.id, d), bank: plan ? 0 : L.bank(ix, m, st, d),
-      frei: L.hasFrei(ix, m.id, d), // heute frei bekommen
+      frei: L.hasFrei(ix, m.id, d), // heute frei bekommen (auch krank)
+      krank: L.isKrank(ix, m.id, d), // heute krank gemeldet
     };
   }
   return { st, d, ix, per, plan, today: L.dKey(d) };
@@ -255,7 +256,9 @@ export async function join(link) {
 export async function login(member_id, pin) { await api('POST', '/login', { member_id, pin }); await enter(); }
 /** Zuletzt offener Reiter (übersteht Neuladen). */
 const savedTab = () => { try { return JSON.parse(localStorage.getItem('pp_view') || 'null')?.tab || null; } catch { return null; } };
-async function enter() { S.chat = []; S.chatBusy = {}; await loadState(); loadSeen(); loadChatSeen(); S.tab = savedTab() || (me?.role === 'admin' ? 'uebersicht' : 'heute'); S.phase = 'app'; connect(); }
+// Übersicht und Rangliste sind seit dem großen Update der Reiter „Familie“
+const OLD_TABS = { uebersicht: 'familie', rang: 'familie' };
+async function enter() { S.chat = []; S.chatBusy = {}; await loadState(); loadSeen(); loadChatSeen(); const t = savedTab(); S.tab = OLD_TABS[t] || t || (me?.role === 'admin' ? 'familie' : 'heute'); S.phase = 'app'; connect(); }
 export async function switchPerson() { await post('/logout'); await boot(); }
 export async function leave() { await post('/leave'); history.replaceState(null, '', '/'); await boot(); }
 

@@ -11,27 +11,26 @@
   import Who from './views/Who.svelte';
   import Today from './views/Today.svelte';
   import Photos from './views/Photos.svelte';
-  import Rank from './views/Rank.svelte';
+  import Familie from './views/Familie.svelte';
   import Me from './views/Me.svelte';
-  import Overview from './views/Overview.svelte';
   import Admin from './views/Admin.svelte';
   import Chat from './views/Chat.svelte';
 
+  // Fünf Reiter für alle. Die Verwaltung (nur Admins) steht am Handy unter „Familie“ (Zahnrad) und „Ich“.
   const NAV = [
-    { id: 'uebersicht', icon: 'layout-dashboard', label: 'Übersicht', admin: true },
     { id: 'heute', icon: 'list-checks', label: 'Heute' },
+    { id: 'familie', icon: 'users', label: 'Familie' },
     { id: 'fotos', icon: 'images', label: 'Fotos' },
     { id: 'claude', icon: 'sparkles', label: 'Claude' },
-    { id: 'rang', icon: 'trophy', label: 'Rangliste' },
     { id: 'ich', icon: 'user', label: 'Ich' },
     { id: 'verwaltung', icon: 'settings', label: 'Verwaltung', admin: true, desk: true },
   ];
-  const VIEWS = { uebersicht: Overview, heute: Today, fotos: Photos, claude: Chat, rang: Rank, ich: Me, verwaltung: Admin };
+  const VIEWS = { heute: Today, familie: Familie, fotos: Photos, claude: Chat, ich: Me, verwaltung: Admin };
   const items = $derived(NAV.filter(n => !n.admin || G.admin));
   const View = $derived(VIEWS[items.some(n => n.id === S.tab) ? S.tab : 'heute']);
   const badge = $derived(G.admin ? G.queue.length + G.proposals.length + G.pinHelp.length + G.openAntraege.length : 0);
   const fresh = $derived(G.freshMine); // neue Kommentare bei meinen Beiträgen
-  const dot = id => (id === 'uebersicht' ? badge : id === 'fotos' ? fresh : id === 'claude' && G.chatNew && S.tab !== 'claude' ? 1 : 0);
+  const dot = id => (id === 'familie' ? badge : id === 'fotos' ? fresh : id === 'claude' && G.chatNew && S.tab !== 'claude' ? 1 : 0);
   // Ansicht merken: Reiter und Scrollstelle überstehen Neuladen und Reiterwechsel.
   // Gemerkt wird der oberste sichtbare Beitrag (data-anchor), weil Pixel bei nachladenden Bildern ungenau sind.
   const VIEW = 'pp_view', FRESH = 30 * 60e3;

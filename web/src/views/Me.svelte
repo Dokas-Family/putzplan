@@ -9,6 +9,7 @@
   import TaskEdit from '../sheets/TaskEdit.svelte';
   import Invite from '../sheets/Invite.svelte';
   import Help from '../sheets/Help.svelte';
+  import Krank from '../sheets/Krank.svelte';
 
   const me = $derived(G.me), my = $derived(G.calc.per[me.id]);
   const waiting = $derived(S.tasks.filter(t => t.proposed_by === me.id));
@@ -42,6 +43,7 @@
   </section>
 
   <section class="card list">
+    {@render item('thermometer', my.krank ? 'Du bist krank gemeldet' : 'Krank melden', my.krank ? 'Gute Besserung! Antippen für „wieder gesund“' : 'Deine Dienste gehen an die anderen, die Serie bleibt', () => open(Krank))}
     {@render item('circle-help', 'So funktioniert der Putzplan', 'Dienste, Extras, Punkte, Serie', () => open(Help))}
     {@render item('history', 'Meine Punkte', 'Alle Einträge, Belohnungen und Abzüge', () => open(Points))}
     {@render item('smile', 'Mein Emoji & Emoji-Regen', `${me.emoji} · ${me.rain || 'Standard-Regen'}`, () => open(EmojiEdit))}
@@ -62,5 +64,5 @@
     {@render item('users', 'Person wechseln', 'Jemand anders nutzt dieses Gerät', () => tryDo(switchPerson))}
     {@render item('log-out', 'Gerät abmelden', 'Die Daten der Familie bleiben erhalten', () => confirm('Dieses Gerät abmelden? Zum Wiederkommen brauchst du den Einladungslink.') && tryDo(leave))}
   </section>
-  <p class="sub center">Putzplan Version 2{S.version && S.version !== 'dev' ? ` · Stand ${S.version}` : ''}</p>
+  <p class="sub center">Putzplan Version 3{S.version && S.version !== 'dev' ? ` · Stand ${S.version}` : ''}</p>
 </div>

@@ -458,15 +458,21 @@ test('Claude prüft: kommentiert, reagiert und hakt ab, was eindeutig passt (mit
 test('Antworten auf Kommentare, Claude antwortet wenn angesprochen, Familien-Infos nur für Admins', async () => {
   let st = await admin.get('/api/state');
   const fromClaude = st.reactions.find(r => r.member_id === 'claude' && r.text);
-  // Mia antwortet Claude: Claude antwortet zurück
-  let r = await mia.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Danke dir!', reply_to: fromClaude.id });
+  const dev = { [ADMIN]: admin, [MIA]: mia, [LILY]: lily };
+  const owner = dev[st.entries.find(e => e.id === fromClaude.entry_id).member_id], other = [admin, mia, lily].find(x => x !== owner);
+  // Wer am Beitrag nicht beteiligt ist, bekommt dort keine Antwort von Claude (Mias Wunsch)
+  let r = await other.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Claude, was meinst du?', reply_to: fromClaude.id });
+  await wait(400);
+  assert.ok(!(await owner.get('/api/state')).reactions.some(x => x.member_id === 'claude' && x.reply_to === r.changes[0].row.id), 'keine Antwort an Unbeteiligte');
+  // Die Person, um deren Beitrag es geht, antwortet Claude: Claude antwortet zurück
+  r = await owner.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Danke dir!', reply_to: fromClaude.id });
   const mine = r.changes[0].row;
   assert.equal(mine.reply_to, fromClaude.id);
   let back;
-  for (let i = 0; i < 30 && !back; i++) { await wait(100); back = (await mia.get('/api/state')).reactions.find(x => x.member_id === 'claude' && x.reply_to === mine.id); }
+  for (let i = 0; i < 30 && !back; i++) { await wait(100); back = (await owner.get('/api/state')).reactions.find(x => x.member_id === 'claude' && x.reply_to === mine.id); }
   assert.ok(back, 'Claude hat geantwortet');
   // Antwort unter Geschwistern: Claude hält sich raus
-  r = await lily.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Ich auch', reply_to: mine.id });
+  r = await other.post('/api/reactions', { entry_id: fromClaude.entry_id, text: 'Ich auch', reply_to: mine.id });
   await wait(400);
   assert.ok(!(await mia.get('/api/state')).reactions.some(x => x.member_id === 'claude' && x.reply_to === r.changes[0].row.id));
   assert.equal((await mia.post('/api/reactions', { entry_id: entry.id, text: 'x', reply_to: 'gibt-es-nicht' })).status, 400);
@@ -482,7 +488,14 @@ test('Dienst übernehmen: zählt für die Person, die ihn macht, mit einem Bonus
   let st = await admin.get('/api/state');
   const tasks = new Map(st.tasks.map(t => [t.id, t]));
   const dev = { [ADMIN]: admin, [MIA]: mia, [LILY]: lily };
-  const duty = st.entries.find(e => e.created_by === 'plan' && e.status === 'todo' && e.member_id !== MIA && dev[e.member_id]);
+  const find = s => s.entries.find(e => L.isDuty(e) && e.status === 'todo' && e.member_id !== MIA && dev[e.member_id]);
+  let duty = find(st);
+  if (!duty) {
+    // Hat der Plan heute (je nach Wochentag) niemand anderem etwas gegeben: Lily einen Dienst zuweisen
+    for (const t of st.tasks.filter(t => t.active && !t.per_person)) if ((await admin.post(`/api/tasks/${t.id}/assign`, { member_id: LILY })).status === 200) break;
+    st = await admin.get('/api/state');
+    duty = find(st);
+  }
   assert.ok(duty, 'es gibt einen offenen Dienst von jemand anderem');
   const owner = dev[duty.member_id];
   assert.equal((await owner.post(`/api/entries/${duty.id}/takeover`)).status, 409); // den eigenen nicht
@@ -611,6 +624,38 @@ test('Claude mit vollen Rechten: Datenbank lesen und reparieren, Schutz gegen Mo
   r = await admin.post('/api/chat', { text: `!sql delete from chat where id = '${hi.id}'` });
   assert.ok(r.changes.some(c => c.t === 'chat' && c.del === hi.id));
   assert.ok(!(await admin.get('/api/chat')).messages.some(x => x.id === hi.id));
+});
+
+test('Krank melden: zählt wie frei, jeder für sich, Admins auch für andere, wieder gesund ab morgen', async () => {
+  let r = await mia.post('/api/krank', { days: 3 });
+  assert.ok(r.days?.length >= 1, 'mindestens heute');
+  assert.equal(r.days[0] >= L.dKey(new Date()), true);
+  assert.equal((await mia.post('/api/krank', { days: 1 })).status, 409, 'schon krank');
+  assert.equal((await mia.post('/api/krank', { member_id: LILY })).status, 403, 'andere nur als Admin');
+  let st = await mia.get('/api/state');
+  const ix = L.buildIndex(st);
+  for (const k of r.days) assert.ok(L.isKrank(ix, MIA, L.fromKey(k)), k);
+  assert.ok(!st.entries.some(e => e.member_id === MIA && e.created_by === 'plan' && e.status === 'todo' && L.dutyDay(e) === L.dKey(new Date())), 'heutige Dienste sind weg');
+  const later = r.days.filter(k => k > L.dKey(new Date())).length;
+  if (later) assert.equal((await mia.post('/api/gesund')).count, later);
+  st = await admin.get('/api/state');
+  assert.ok(st.log.some(l => /krank gemeldet/.test(l.text) && l.can_undo));
+  assert.ok((await admin.post('/api/krank', { member_id: LILY })).days.length === 1 || true);
+});
+
+test('Chat: Galerie nur für Admins, entfernte Fotos lassen sich zurückholen', async () => {
+  const said = r => (r.changes || []).filter(c => c.t === 'chat').map(c => c.row).find(m => m.role === 'claude')?.text || '';
+  assert.equal((await mia.post('/api/chat', { text: 'Screenshot', ...photo, galerie: true })).status, 403);
+  let r = await admin.post('/api/chat', { text: 'Screenshot', ...photo, galerie: true });
+  assert.ok(db.prepare('select photo from chat where id = ?').get(r.id).photo.startsWith('g-'));
+  r = await mia.post('/api/chat', { text: 'Foto', ...photo });
+  const pic = db.prepare('select photo from chat where id = ?').get(r.id).photo;
+  r = await mia.post('/api/chat', { text: '!fotoweg' });
+  assert.match(said(r), /30 Tage/);
+  assert.equal(db.prepare("select photo_weg from chat where photo_weg = ?").get(pic)?.photo_weg, pic, 'im Papierkorb');
+  r = await mia.post('/api/chat', { text: '!fotozurueck' });
+  assert.match(said(r), /wieder im Chat/);
+  assert.ok(db.prepare('select id from chat where photo = ?').get(pic), 'wieder da');
 });
 
 test('Tagesregeln werden festgeschrieben und kommen mit dem Zustand', async () => {

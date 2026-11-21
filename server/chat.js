@@ -10,7 +10,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { DatabaseSync, constants as SQ } from 'node:sqlite';
 import { db, DATA, q, row, out, insert, patch, getMeta, setMeta, settings, logicState, tageMap, savePhoto, photoFile, delPhoto } from './db.js';
-import { on, match, Fail, now, emit, emitTo, emitRaw, emitRow } from './core.js';
+import { on, match, Fail, now, emit, emitTo, emitRaw, emitRow, logError } from './core.js';
 import { notify } from './push.js';
 import { freeUp } from './plan.js';
 import { PERSONA_BASE, frames } from './reviewer.js';
@@ -20,7 +20,7 @@ import * as L from '../shared/logic.js';
 const MODEL = process.env.CLAUDE_CHAT_MODEL || 'claude-opus-5-5';
 const EFFORT = process.env.CLAUDE_CHAT_EFFORT || 'medium'; // Felix: „Opus medium“
 const FAKE = process.env.CLAUDE_FAKE === '1';
-const client = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 120_000 }) : null;
+const client = process.env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 2, timeout: 300_000 }) : null;
 export const chatReady = () => !!client || FAKE;
 
 // Opus 5.5 in US-Dollar je Million Tokens: Eingabe, Cache schreiben (5 Min), Cache lesen, Ausgabe. Grob in Euro umgerechnet.
@@ -112,7 +112,7 @@ function lage(me) {
     const duties = plan ? L.dutiesOn(ix, m.id, d, d) : [];
     const done = st.entries.filter(x => x.status === 'done' && x.after_at && !L.ADMIN_KINDS.has(x.task_id) && L.involved(x, m.id) && L.dKey(new Date(x.after_at)) === k);
     const bits = [];
-    if (L.hasFrei(ix, m.id, d)) bits.push('hat heute frei');
+    if (L.hasFrei(ix, m.id, d)) bits.push(L.isKrank(ix, m.id, d) ? 'ist heute krank gemeldet' : 'hat heute frei');
     if (plan) bits.push(`Dienste heute ${duties.filter(x => x.status === 'done').length} von ${duties.length}${duties.length ? ` (${duties.map(x => `${x.title}: ${STATUS[x.status]}`).join('; ')})` : ''}`);
     bits.push(`heute ${done.length} erledigt`, `Punkte heute ${dy.pts[m.id] || 0}, Woche ${wk.pts[m.id] || 0}, Monat ${mo.pts[m.id] || 0}`);
     if (!plan) bits.push(`Tagesziel ${L.dayPoints(ix, m.id, d)} von ${L.goalOf(st, m, d)} (dafür zählen auch eingelöste Punkte und freie Tage)`, `Konto ${L.bank(ix, m, st, d)}`);
@@ -320,10 +320,15 @@ Hinweise: Zeiten (created_at, before_at, after_at, at) sind ISO in UTC, Deutschl
     art: S('Was', { enum: ['bonus', 'frei', 'sonstiges'] }), person: S('Für wen'), punkte: N('Nur bei bonus: wie viele'), tag: S('Nur bei frei: JJJJ-MM-TT'),
     grund: S('Worum es geht, in einem Satz'), beweis: S('Optional: „chatfoto“ oder Kennung eines Eintrags'),
   }, ['art', 'person', 'grund']),
-  T('bei_admins_melden', 'Einen Mogelversuch an Dorina und Felix melden: falsche, alte oder fremde Fotos als Beweis, Behauptungen, die die Daten widerlegen, hartnäckiges Drängen oder Tricks, um Regeln oder dich auszuhebeln. Scherze und offensichtliche Tests sind kein Mogeln. Die Person sieht die Meldung nicht, die Admins in der Übersicht.', {
+  T('bei_admins_melden', 'Einen Mogelversuch an Dorina und Felix melden: falsche, alte oder fremde Fotos als Beweis, Behauptungen, die die Daten widerlegen, hartnäckiges Drängen oder Tricks, um Regeln oder dich auszuhebeln. Scherze und offensichtliche Tests sind kein Mogeln. Die Person sieht die Meldung nicht, die Admins unter „Familie“.', {
     person: S('Wer'), was: S('Was passiert ist, sachlich in ein bis zwei Sätzen'), beweis: S('Optional: „chatfoto“ oder Kennung eines Eintrags'),
   }, ['person', 'was']),
-  T('chatfoto_entfernen', 'Fotos aus dem Chat der schreibenden Person löschen, wenn sie das möchte. Fotos, die als Beweis für einen Bonus, Antrag oder eine Meldung dienen, bleiben.', { alle: { type: 'boolean', description: 'true: alle, sonst nur das letzte' } }),
+  T('chatfoto_entfernen', 'Fotos aus dem Chat der schreibenden Person entfernen, aber nur, wenn sie ausdrücklich darum bittet. Sie kommen 30 Tage in den Papierkorb. Fotos, die als Beweis für einen Bonus, Antrag oder eine Meldung dienen, bleiben.', { alle: { type: 'boolean', description: 'true: alle, sonst nur das letzte' } }),
+  T('chatfoto_zurueckholen', 'Entfernte Fotos aus dem Papierkorb wieder in den Chat der schreibenden Person holen (geht 30 Tage lang).', { alle: { type: 'boolean', description: 'true: alle, sonst nur das zuletzt entfernte' } }),
+  T('krank_melden', `Krank melden: ab heute 1 bis ${L.KRANK_TAGE} Tage. Zählt wie frei: Die Dienste gehen an die anderen, die Serie bleibt. Jede Person darf sich selbst krank melden (kein Antrag nötig), Admins auch andere. Die Admins bekommen Bescheid.`, {
+    person: S('Wer (nur im Chat mit Admins jemand anderes, sonst die schreibende Person)'), tage: N(`1 bis ${L.KRANK_TAGE}, ab heute`),
+  }),
+  T('wieder_gesund', 'Wieder gesund: Krankmeldungen ab morgen zurücknehmen (heute bleibt, wie es ist).', { person: S('Wer (nur im Chat mit Admins jemand anderes)') }),
   // Nur im Chat mit Admins
   T('belohnen', 'Nur im Chat mit Admins: Belohnung (bonus), Abmahnung (warn) oder freier Tag (frei) vergeben.', {
     art: S('Was', { enum: ['bonus', 'warn', 'frei'] }), person: S('Für wen'), punkte: N('Bei bonus und warn: 1 bis 50'), grund: S('Grund, steht als Titel'), tag: S('Bei frei: der freie Tag als JJJJ-MM-TT (bis 6 Tage zurück, bis 14 voraus)'),
@@ -449,7 +454,7 @@ function melden(me, a, turn) {
   emitAntrag(row('antraege', id));
   notify(admins().filter(x => x !== m.id), `Claude meldet: ${m.name}`, was.slice(0, 140));
   claudeLog(`hat ${m.name} bei den Admins gemeldet: ${was}${chatWith(me)}`);
-  return 'Gemeldet. Dorina und Felix sehen es in der Übersicht. Die Person sieht die Meldung nicht.';
+  return 'Gemeldet. Dorina und Felix sehen es unter „Familie“. Die Person sieht die Meldung nicht.';
 }
 /** Admin entscheidet über einen Antrag. Angenommen: Bonus oder freier Tag wird gleich eingetragen. Meldungen werden abgehakt. */
 export function decide(me, id, accept, note = '') {
@@ -499,13 +504,25 @@ function dropPhotos(me, a, turn) {
   const rows = q.all('select * from chat where member_id = ? and photo is not null order by created_at desc', me.id).filter(r => !used.has(r.photo));
   const pick = a.alle ? rows : rows.slice(0, 1);
   if (!pick.length) return 'Hier gibt es kein Foto, das sich entfernen lässt (Fotos, die als Beweis dienen, bleiben).';
+  // Nicht sofort löschen: 30 Tage im Papierkorb, solange lässt es sich zurückholen (Felix bereute einmal das Löschen)
   for (const r of pick) {
-    delPhoto(r.photo);
-    patch('chat', r.id, { photo: null, text: r.text || '(Foto entfernt)' });
+    patch('chat', r.id, { photo: null, photo_weg: r.photo, weg_at: now(), text: r.text || '(Foto entfernt)' });
     emitTo(me.id, 'chat', row('chat', r.id));
   }
+  claudeLog(`hat auf Wunsch von ${me.name} ${pick.length === 1 ? 'ein Foto' : `${pick.length} Fotos`} aus dem Chat entfernt (30 Tage wiederherstellbar)`, pick.map(r => ({ t: 'chat', id: r.id, restore: r })));
   turn.actions.push({ icon: 'image-off', text: pick.length === 1 ? 'Foto entfernt' : `${pick.length} Fotos entfernt` });
-  return `Erledigt, ${pick.length === 1 ? 'das Foto ist' : `${pick.length} Fotos sind`} gelöscht.`;
+  return `Erledigt, ${pick.length === 1 ? 'das Foto ist' : `${pick.length} Fotos sind`} aus dem Chat entfernt. 30 Tage lang lässt es sich noch zurückholen (chatfoto_zurueckholen), danach ist es endgültig weg.`;
+}
+function restorePhotos(me, a, turn) {
+  const rows = q.all('select * from chat where member_id = ? and photo_weg is not null order by weg_at desc', me.id);
+  const pick = a.alle ? rows : rows.slice(0, 1);
+  if (!pick.length) return 'Im Papierkorb dieses Chats liegt kein Foto (nach 30 Tagen sind sie endgültig gelöscht).';
+  for (const r of pick) {
+    patch('chat', r.id, { photo: r.photo_weg, photo_weg: null, weg_at: null, text: r.text === '(Foto entfernt)' ? '' : r.text });
+    emitTo(me.id, 'chat', row('chat', r.id));
+  }
+  turn.actions.push({ icon: 'image', text: pick.length === 1 ? 'Foto zurückgeholt' : `${pick.length} Fotos zurückgeholt` });
+  return `Erledigt, ${pick.length === 1 ? 'das Foto ist' : `${pick.length} Fotos sind`} wieder im Chat.`;
 }
 
 async function runTool(me, name, a, turn) {
@@ -573,6 +590,20 @@ async function runTool(me, name, a, turn) {
     case 'antrag_stellen': return antrag(me, a, turn);
     case 'bei_admins_melden': return melden(me, a, turn);
     case 'chatfoto_entfernen': return dropPhotos(me, a, turn);
+    case 'chatfoto_zurueckholen': return restorePhotos(me, a, turn);
+    case 'krank_melden': {
+      const m = a.person ? person(a.person) : me;
+      const r = call(me, 'POST', '/api/krank', { member_id: m.id, days: a.tage || 1 });
+      const days = r.days.map(k => dayLabel(L.fromKey(k)));
+      turn.actions.push({ icon: 'thermometer', text: `${m.id === me.id ? 'Krank gemeldet' : `${m.name} krank gemeldet`}: ${days.join(', ')}` });
+      return `Erledigt: ${m.name} ist krank gemeldet (${days.join(', ')}). Die Dienste gehen an die anderen, die Serie bleibt, die Admins wissen Bescheid.`;
+    }
+    case 'wieder_gesund': {
+      const m = a.person ? person(a.person) : me;
+      const r = call(me, 'POST', '/api/gesund', { member_id: m.id });
+      turn.actions.push({ icon: 'heart', text: `${m.id === me.id ? 'Wieder gesund' : `${m.name} wieder gesund`}` });
+      return `Erledigt: ${r.count} Krankentag(e) ab morgen zurückgenommen.`;
+    }
     case 'belohnen': {
       adminChat(me, 'Belohnen, abmahnen und frei geben');
       const m = person(a.person), kind = ['bonus', 'warn', 'frei'].includes(a.art) ? a.art : 'bonus';
@@ -622,7 +653,7 @@ So sieht deine Antwort aus (der Chat zeigt Markdown an):
 - **fett**, *kursiv*, Listen, Zitate, Links, Tabellen (| Name | Punkte |) und Codeblöcke mit Sprache (\`\`\`python) gehen. Setz das ein, wenn es wirklich hilft, nicht bei jeder Antwort.
 - @Name zeigt eine Person aus der Familie mit ihrem Emoji, zum Beispiel @Mia.
 - Symbole der App mit :name:, zum Beispiel :flame: :trophy: :crown: :star: :calendar-check: :trash-2: :tree-palm:. Erlaubt sind nur diese: ${[...ICONS].join(' ')}.
-- Fotos aus der App zeigst du mit ![Text](foto:NAME). Die Namen stehen bei eintrag_ansehen oder in before_photo/after_photo. Chat-Fotos (Name beginnt mit c-) nur aus diesem Chat.
+- Fotos aus der App zeigst du mit ![Text](foto:NAME). Die Namen stehen bei eintrag_ansehen oder in before_photo/after_photo. Chat-Fotos (Name beginnt mit c- oder g-) nur aus diesem Chat.
 - Kleine Diagramme als Codeblock, je Zeile „Bezeichnung: Wert“, eine Zeile „Titel: …“ geht dazu:
   \`\`\`balken  (Vergleich, z. B. „@Mia: 45“, „@Felix: 21 P“)
   \`\`\`fortschritt  (Stand zum Ziel, z. B. „@Iris: 3/10“)
@@ -636,6 +667,10 @@ Deine Rechte:
 - Den Code der App ändern kannst du nicht. Wünscht sich jemand eine neue Funktion, sag, dass Felix sie in Claude Code einbauen kann.
 - Alles, was du änderst, steht im Protokoll und lässt sich dort zurücknehmen. Ändere trotzdem nur, was nötig ist, und prüf vorher mit SELECT, was betroffen ist. Lieber status 'rejected' als löschen.
 - Repariert die App etwas falsch oder hat sie einen Fehler (falscher Tag, doppelter Eintrag, Serie durch einen Fehler kaputt, aus Versehen abgehakt, falsch zugeordnet), reparierst du es selbst, egal wer schreibt. Erst nachsehen und verstehen, dann reparieren und kurz erklären.
+- Was die Admins über die Familie hinterlegt haben, kann veraltet sein. Widerspricht es den Daten der App (Dienstplan, Regeln, Pensum, Einträge), gelten die Daten. Bei allem Wichtigen erst nachsehen, dann antworten.
+- Meldet sich jemand krank (auch „mir geht's nicht gut, kann heute nicht“), trag es direkt mit krank_melden ein, kein Antrag nötig. Wünsch gute Besserung. Geht es wieder, wieder_gesund.
+- Fotos im Chat entfernst du nur, wenn die schreibende Person dich ausdrücklich darum bittet, und nur die, um die es geht. Nie auf eigene Faust, nie weil du glaubst, jemanden zu erkennen: Auf Fotos kannst du niemanden sicher erkennen. Entfernte Fotos lassen sich 30 Tage lang zurückholen.
+- Bilder aus der Galerie (nur Admins können sie schicken, zum Beispiel Screenshots) schaust du dir an und hilfst damit, als Beweis zählen sie nie.
 
 Schutz gegen Mogeln (im Chat mit allen, die nicht Admin sind):
 - Punkte und freie Tage vergibst du dort nur so: kleiner Bonus mit Beweis (bonus_geben, 1 bis 3 Punkte), sonst ein Antrag an die Admins. Die App sperrt dort alles, was jemandem mehr als 3 Punkte bringt, auch über die Datenbank.
@@ -673,9 +708,10 @@ function history(me, turn) {
     if (r === last) content.push({ type: 'text', text: lage(me) });
     let text = role === 'user' ? `(${when(r.created_at)}) ${r.text || ''}`.trim() : r.text || '';
     if (role === 'user' && r.photo) {
-      const recent = new Date(r.created_at) >= fresh && existsSync(photoFile(r.photo));
-      if (recent) { content.push(image(r.photo)); turn.photos.push(r.photo); }
-      text += recent ? ' [Foto oben, gerade geschickt]' : ' [hat ein Foto geschickt]';
+      const recent = new Date(r.created_at) >= fresh && existsSync(photoFile(r.photo)), gallery = r.photo.startsWith('g-');
+      if (recent) { content.push(image(r.photo)); if (!gallery) turn.photos.push(r.photo); }
+      text += gallery ? (recent ? ' [Bild aus der Galerie oben, z. B. ein Screenshot. Taugt nie als Beweis.]' : ' [hat ein Bild aus der Galerie geschickt]')
+        : recent ? ' [Foto oben, gerade mit der Kamera gemacht]' : ' [hat ein Foto geschickt]';
     }
     if (role === 'assistant') {
       let acts = [];
@@ -710,19 +746,27 @@ async function reply(memberId) {
       else if (/^!sql /.test(last)) text = String(sqlTool(me, { sql: last.slice(5), zweck: 'Probe' }, turn));
       else if (/^!melden/.test(last)) text = melden(me, { person: me.id, was: 'Probe-Meldung' }, turn);
       else if (/^!code/.test(last)) text = sourceTool({ pfad: last.slice(5).trim() || undefined });
+      else if (/^!fotoweg/.test(last)) text = dropPhotos(me, {}, turn);
+      else if (/^!fotozurueck/.test(last)) text = restorePhotos(me, {}, turn);
       else if (/^!frei /.test(last)) text = String(await runTool(me, 'belohnen', { art: 'frei', person: me.id, tag: last.slice(6).trim() }, turn));
       else text = `Probe-Antwort an ${me.name}`;
     } catch (e) { text = e.message; }
     return say(memberId, text, turn.actions, 0.01);
   }
+  // Eine Antwort gibt es immer: Sind die Runden mit Werkzeugen aufgebraucht oder endet eine Antwort ohne Text
+  // (am 20.11. dreimal bei Dorina passiert), fragt die App einmal ohne Werkzeuge nach einer Antwort in Textform.
+  const nudge = hint => msgs.at(-1).content.push({ type: 'text', text: `(Hinweis der App: ${hint})` });
+  let rounds = 0, noTools = false;
   try {
-    for (let round = 1; round <= ROUNDS; round++) {
+    for (;;) {
+      rounds++;
       const res = await client.messages.create({
         model: MODEL,
-        max_tokens: 8000,
+        max_tokens: 16000,
         output_config: { effort: EFFORT },
         system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
         tools: TOOLS,
+        ...(noTools ? { tool_choice: { type: 'none' } } : {}),
         messages: msgs,
         cache_control: { type: 'ephemeral' }, // der wachsende Verlauf wird mitgecacht
       });
@@ -731,26 +775,34 @@ async function reply(memberId) {
       const said = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
       if (said) text = said;
       const uses = res.content.filter(b => b.type === 'tool_use');
-      if (res.stop_reason !== 'tool_use' || !uses.length) break;
-      msgs.push({ role: 'assistant', content: res.content });
-      const results = [];
-      for (const u of uses) {
-        try {
-          const content = await runTool(me, u.name, u.input || {}, turn);
-          results.push({ type: 'tool_result', tool_use_id: u.id, content });
-        } catch (e) {
-          if (!e.status) console.error('Chat-Werkzeug', u.name, e);
-          results.push({ type: 'tool_result', tool_use_id: u.id, is_error: true, content: e.status ? e.message : `Da ist intern etwas schiefgelaufen: ${e.message}` });
+      if (res.stop_reason === 'tool_use' && uses.length && !noTools) {
+        msgs.push({ role: 'assistant', content: res.content });
+        const results = [];
+        for (const u of uses) {
+          try {
+            const content = await runTool(me, u.name, u.input || {}, turn);
+            results.push({ type: 'tool_result', tool_use_id: u.id, content });
+          } catch (e) {
+            if (!e.status) logError(`Chat-Werkzeug ${u.name}`, e, String(e?.stack || '').split('\n')[1]?.trim());
+            results.push({ type: 'tool_result', tool_use_id: u.id, is_error: true, content: e.status ? e.message : `Da ist intern etwas schiefgelaufen: ${e.message}` });
+          }
         }
+        msgs.push({ role: 'user', content: results });
+        if (overLimit(me) || (me.role !== 'admin' && spent(me.id) + cost >= LIMIT_EUR)) { text = text || 'Für diesen Monat muss ich hier leider aufhören.'; break; }
+        if (rounds >= ROUNDS) { nudge('Genug nachgesehen. Antworte jetzt in Textform mit dem, was du weißt, und sag ehrlich, was du nicht herausgefunden hast.'); noTools = true; }
+        continue;
       }
-      msgs.push({ role: 'user', content: results });
-      if (overLimit(me) || (me.role !== 'admin' && spent(me.id) + cost >= LIMIT_EUR)) { text = text || 'Für diesen Monat muss ich hier leider aufhören.'; break; }
+      if (said) break;
+      if (noTools) { logError('Chat', `keine Antwort nach ${rounds} Runden (${res.stop_reason})`, me.name); break; }
+      logError('Chat', `Antwort ohne Text (${res.stop_reason}) in Runde ${rounds}, frage nach`, me.name);
+      nudge('Bitte antworte jetzt in Textform.');
+      noTools = true;
     }
   } catch (e) {
-    console.error('Chat:', e?.status, e?.message);
+    logError('Chat', e, me.name);
     return say(memberId, 'Da hat gerade etwas nicht geklappt. Versuch es gleich nochmal.', turn.actions, cost);
   }
-  const id = say(memberId, text || (turn.actions.length ? 'Erledigt.' : 'Hm, dazu fällt mir gerade nichts ein. Magst du es anders formulieren?'), turn.actions, cost);
+  const id = say(memberId, text || (turn.actions.length ? 'Erledigt.' : 'Da bin ich gerade hängen geblieben, sorry. Schreib mir bitte nochmal, was du brauchst.'), turn.actions, cost);
   afterReply(turn);
   return id;
 }
@@ -775,11 +827,13 @@ on('POST', '/api/chat', 'member', ({ body, me }) => {
   if (!text && !body.photo) throw new Fail(400, 'Die Nachricht ist leer');
   if (busy.has(me.id)) throw new Fail(409, 'Claude antwortet noch auf deine letzte Nachricht');
   if (overLimit(me)) throw new Fail(429, 'Für diesen Monat hast du Claude schon sehr viel gefragt. Ab nächstem Monat geht es weiter.');
-  const id = randomUUID(), photo = body.photo ? savePhoto('c-' + id, body.photo, body.thumb) : null;
+  // Bilder aus der Galerie (Screenshots) nur für Admins (Dorinas Wunsch). Sie zählen nie als Beweis, deshalb eigener Name.
+  if (body.galerie && me.role !== 'admin') throw new Fail(403, 'Bilder aus der Galerie gehen nur für Admins. Mach bitte ein Foto mit der Kamera.');
+  const id = randomUUID(), photo = body.photo ? savePhoto((body.galerie ? 'g-' : 'c-') + id, body.photo, body.thumb) : null;
   insert('chat', { id, member_id: me.id, role: 'user', text, photo, actions: [], cost: 0, created_at: now() });
   emitTo(me.id, 'chat', row('chat', id));
   setBusy(me.id, true);
-  reply(me.id).catch(e => console.error('Chat:', e)).finally(() => setBusy(me.id, false));
+  reply(me.id).catch(e => logError('Chat', e, me.name)).finally(() => setBusy(me.id, false));
   return { id };
 });
 /** Wann Claude der Person zuletzt geschrieben hat (für den Punkt am Reiter). */
